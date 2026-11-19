@@ -392,7 +392,8 @@ CREATE TABLE IF NOT EXISTS public.holidays (
     type TEXT NOT NULL DEFAULT 'NATIONAL' CHECK (type IN ('NATIONAL', 'STATE', 'MUNICIPAL', 'OPTIONAL')),
     state_code VARCHAR(2),
     city_code VARCHAR(7),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(date, name)
 );
 
 -- 7. TRABALHADORES & CONTRATOS
@@ -836,7 +837,7 @@ CREATE TABLE IF NOT EXISTS public.employee_benefits (
 CREATE TABLE IF NOT EXISTS public.rubrics (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
-    code TEXT NOT NULL,
+    code TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
     type TEXT NOT NULL CHECK (type IN ('EARNING', 'DEDUCTION', 'NEUTRAL')),
     category TEXT NOT NULL,
