@@ -1,0 +1,257 @@
+export type RubricKind =
+  | 'SALARY_BASE'
+  | 'OVERTIME'
+  | 'DSR'
+  | 'DSR_NOTURNO'
+  | 'ADIC_NOTURNO'
+  | 'INSALUBRIDADE'
+  | 'PERICULOSIDADE'
+  | 'ABSENCE'
+  | 'LATE'
+  | 'COMMISSION'
+  | 'FAMILY_SALARY'
+  | 'ALIMONY'
+  | 'LOAN'
+  | 'UNION'
+  | 'ADVANCE'
+  | 'BENEFIT'
+  | 'VACATION'
+  | 'THIRTEENTH'
+  | 'TERMINATION'
+  | 'INSS'
+  | 'IRRF'
+  | 'FGTS'
+  | 'NIGHT_SHIFT'
+  | 'UNHEALTHY'
+  | 'HAZARD'
+  | 'OTHER';
+
+export interface Rubric {
+  id: string;
+  code: string;
+  name: string;
+  type: 'EARNING' | 'DEDUCTION' | 'NEUTRAL';
+  category: string;
+  rubric_kind?: RubricKind;
+  manual_value?: number;
+  status?: 'DRAFT' | 'APPROVED' | 'ACTIVE' | 'RETIRED';
+  is_system?: boolean;
+  esocial_nature?: string;
+  legal_basis?: string;
+  version?: number;
+  calculation_form: string;
+  calculation_base?: string;
+  percentage?: number;
+  quantity?: number;
+  divisor?: number;
+  factor?: number;
+  formula?: string;
+  calculation_order: number;
+  incidencias: {
+    inss: boolean;
+    irrf: boolean;
+    fgts: boolean;
+    inss_patronal: boolean;
+    rat: boolean;
+    terceiros: boolean;
+    gera_base_inss: boolean;
+    gera_base_irrf: boolean;
+    gera_base_fgts: boolean;
+    integra_dsr?: boolean;
+  };
+}
+
+export interface PayrollEvent {
+  id?: string;
+  rubric_id: string;
+  quantity?: number;
+  reference?: string;
+  manual_value?: number;
+  percentage?: number;
+  value_type?: 'AMOUNT' | 'PERCENT';
+  origin?: string;
+}
+
+export interface CalculationMemory {
+  rubric_id: string;
+  step_name: string;
+  base_value: number;
+  quantity_used: number;
+  percentage_used: number;
+  parsed_formula: string;
+  result_value: number;
+  origin: string;
+}
+
+export interface CalculationResult {
+  total_proventos: number;
+  total_descontos: number;
+  total_inss: number;
+  total_irrf: number;
+  total_fgts: number;
+  total_encargos_patronais: number;
+  liquido: number;
+  bases: {
+    inss: number;
+    irrf: number;
+    fgts: number;
+  };
+  memoria_calculo: CalculationMemory[];
+  status: string;
+}
+
+export interface InssBracket {
+  bracket_number: number;
+  base_limit: number | null;
+  aliquot: number;
+  deduction: number;
+}
+
+export interface IrrfBracket {
+  bracket_number: number;
+  base_limit: number | null;
+  aliquot: number;
+  deduction: number;
+}
+
+export interface GeneralLegalParameters {
+  minimum_wage?: number;
+  dependent_deduction?: number;
+  simplified_discount?: number;
+  family_salary_quota?: number;
+  family_salary_limit?: number;
+  fgts_standard_aliquot?: number;
+  fgts_apprentice_aliquot?: number;
+  irrf_exemption_limit?: number;
+  irrf_reduction_formula_limit?: number;
+  irrf_base_reduction?: number;
+  irrf_reduction_a?: number;
+  irrf_reduction_b?: number;
+}
+
+export interface PayrollContextData {
+  competencia: string; 
+  tipo_folha: string;
+  empregado_id: string;
+  contrato_id: string;
+  salario_base: number;
+  dias_trabalhados: number;
+  dias_uteis: number;
+  dias_inuteis: number;
+  divisor: number;
+  num_dependentes?: number;
+  is_apprentice?: boolean;
+  rubricas: Rubric[];
+  eventos: PayrollEvent[];
+  contract_incidences?: any;
+  inss_parameters?: InssBracket[];
+  irrf_parameters?: IrrfBracket[];
+  general_legal_parameters?: GeneralLegalParameters;
+}
+
+export class PayrollContext {
+  competencia: string;
+  tipo_folha: string;
+  empregado_id: string;
+  contrato_id: string;
+  salario_base: number;
+  dias_trabalhados: number;
+  dias_uteis: number;
+  dias_inuteis: number;
+  divisor: number;
+  salario_minimo: number;
+  rubricas: Map<string, Rubric>;
+  eventos: PayrollEvent[];
+  contract_incidences?: any;
+  inss_parameters?: InssBracket[];
+  irrf_parameters?: IrrfBracket[];
+  general_legal_parameters?: GeneralLegalParameters;
+  allow_cumulative_hazard_allowances: boolean = false;
+  is_apprentice: boolean = false;
+  // T16: Base de INSS já tributada em outras folhas da mesma competência (férias, complementar, etc.)
+  base_inss_already_taxed: number = 0;
+  // T17: Total de pensão alimentícia judicial apurada (dedutível da base de IRRF)
+  total_alimony: number = 0;
+  
+  // Variables tracking
+  variables: Record<string, number>;
+  
+  // Variáveis Acumuladoras Globais (Estado da Máquina)
+  base_inss: number = 0;
+  base_irrf: number = 0;
+  base_fgts: number = 0;
+
+  total_proventos: number = 0;
+  total_descontos: number = 0;
+
+  memoria: CalculationMemory[] = [];
+
+  constructor(data: any) {
+    this.competencia = data.competencia;
+    this.tipo_folha = data.tipo_folha;
+    this.empregado_id = data.empregado_id;
+    this.contrato_id = data.contrato_id;
+    this.salario_base = data.salario_base || 0;
+    this.dias_trabalhados = data.dias_trabalhados !== undefined ? data.dias_trabalhados : 30;
+    this.dias_uteis = data.dias_uteis !== undefined ? data.dias_uteis : 26;
+    this.dias_inuteis = data.dias_inuteis !== undefined ? data.dias_inuteis : 4;
+    this.divisor = data.divisor || 220;
+    const sm = data.salario_minimo ?? data.general_legal_parameters?.minimum_wage;
+    if (!sm || Number(sm) <= 0) {
+      throw new Error('Parâmetro legal obrigatório ausente: salario_minimo');
+    }
+    this.salario_minimo = Number(sm);
+    this.rubricas = new Map((data.rubricas || []).map((r: Rubric) => [r.id, structuredClone(r)]));
+    this.eventos = data.eventos || [];
+    this.allow_cumulative_hazard_allowances = Boolean(data.allow_cumulative_hazard_allowances);
+    this.is_apprentice = Boolean(data.is_apprentice);
+    this.base_inss_already_taxed = Number(data.base_inss_already_taxed || 0);
+    this.total_alimony = Number(data.total_alimony || 0);
+    this.contract_incidences = data.contract_incidences || null;
+    this.inss_parameters = data.inss_parameters || [];
+    this.irrf_parameters = data.irrf_parameters || [];
+    this.general_legal_parameters = data.general_legal_parameters || {};
+
+    this.memoria = [];  
+    this.variables = {
+      'SALARIO_BASE': this.salario_base,
+      'SALARIO_MINIMO': this.salario_minimo,
+      'SALARIO_CONTRATUAL': this.salario_base,
+      'DIAS_TRABALHADOS': this.dias_trabalhados,
+      'HORAS_TRABALHADAS': this.divisor,
+      'DIAS_UTEIS': this.dias_uteis,
+      'DIAS_INUTEIS': this.dias_inuteis,
+      'DIVISOR': this.divisor,
+      'DEPENDENTES': data.num_dependentes ?? data.dependentes ?? 0,
+      'BASE_DSR': 0,
+      'BASE_DSR_NOTURNO': 0,
+      'BASE_HORA_EXTRA': 0,
+    };
+
+    // T24: Pré-carregar todas as rubricas do catálogo com valor 0 na variável R{code}
+    for (const r of Array.from(this.rubricas.values())) {
+      if (r.code) {
+        this.variables[`R${r.code}`] = 0;
+      }
+    }
+  }
+
+  setVariable(name: string, value: number) {
+    this.variables[name] = value;
+  }
+
+  getVariable(name: string): number {
+    if (name in this.variables) {
+      return this.variables[name];
+    }
+    throw new Error(`Variável ou base de cálculo inexistente no contexto: '${name}'`);
+  }
+
+  hasVariable(name: string): boolean {
+    return name in this.variables;
+  }
+
+  addMemory(mem: CalculationMemory) {
+    this.memoria.push(mem);
+  }
+}
