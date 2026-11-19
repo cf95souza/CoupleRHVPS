@@ -1,0 +1,21 @@
+{
+  "name": "couplerh-monorepo",
+  "version": "2.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:api": "npm --workspace=@couplerh/api run dev",
+    "dev:web": "npm --workspace=@couplerh/web run dev",
+    "build:core": "npm --workspace=@couplerh/payroll-core run build",
+    "build:api": "npm --workspace=@couplerh/api run build",
+    "build:web": "npm --workspace=@couplerh/web run build",
+    "build": "npm run build:core && npm run build:api && npm run build:web",
+    "typecheck": "npm --workspace=@couplerh/payroll-core run typecheck && npm --workspace=@couplerh/api run typecheck && npm --workspace=@couplerh/web run typecheck",
+    "test": "npm --workspace=@couplerh/payroll-core run test && npm --workspace=@couplerh/api run test",
+    "lint": "npm --workspace=@couplerh/payroll-core run lint && npm --workspace=@couplerh/api run lint && npm --workspace=@couplerh/web run lint",
+    "ci": "npm run lint && npm run typecheck && npm run test && npm run build"
+  }
+}
