@@ -48,7 +48,7 @@ Este documento é o **roteiro oficial de desenvolvimento** da nova versão do **
 
 | Fase | Escopo Principal | Ref. no Blueprint | Status |
 |---|---|---|---|
-| **V0** | Novo Repositório Git Limpo, Monorepo Open-Source & Baseline PostgreSQL 17 Puro | 📗 Blueprint v2.0 §3 (FASE V0) | `[Pendente]` |
+| **V0** | Novo Repositório Git Limpo, Monorepo Open-Source & Baseline PostgreSQL 17 Puro | 📗 Blueprint v2.0 §3 (FASE V0) | `[Concluída]` |
 | **V1** | Infraestrutura VPS Oracle Cloud ARM64 (`postgres:17` + Fastify/`pg-boss` + Caddy + Storage HMAC + Backup OCI) | 📗 Blueprint v2.0 §2 e §3 (FASE V1) | `[Pendente]` |
 | **V2** | Autenticação Própria Open-Source (Argon2id/JWT/Cookie/MFA `otplib`), Portal Unificado & Blindagem P0 | 📗 Blueprint v2.0 §3 (FASE V2) | `[Pendente]` |
 | **V3** | Controle de Perfis Real (RBAC Dinâmico + Escopo Filial/Depto/CC/Equipe + Sigilo Salarial) & API REST Modular | 📗 Blueprint v2.0 §3 (FASE V3) | `[Pendente]` |
@@ -63,16 +63,16 @@ Este documento é o **roteiro oficial de desenvolvimento** da nova versão do **
 ---
 
 ## 🧹 FASE V0: Novo Repositório Git Limpo, Monorepo Open-Source & Baseline PostgreSQL 17 Puro
-**Status:** `[Pendente]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §3 FASE V0
+**Status:** `[Concluída em 22/11/2026]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §3 FASE V0
 
 - [x] **REPO-01** [Concluído em 19/11/2026] Novo repositório limpo criado em `D:\Repositorios\CoupleRHVPS` via `git init -b main` conectado a `https://github.com/cf95souza/CoupleRHVPS.git`; histórico `.git` legado isolado (protegendo credenciais); `.gitignore` estrito configurado; remoção completa de `supabase/`, scripts soltos, `vercel.json` e dependência `@supabase/supabase-js`. (Commit `35e1c67`)
 - [x] **REPO-02** [Concluído em 19/11/2026] Monorepo open-source estruturado (`packages/payroll-core` com TypeScript puro, `money.ts` HALF_UP e 16 testes unitários verdes; `apps/api` Fastify 5 + Zod + pg + pool com health check e testes verdes; `apps/web` React 19 + Vite 8 + Tailwind 4 compilando limpo em `dist/` com `apiClient.ts` e `src/config/env.ts` sem hardcodes; `npm run ci` 100% verde). (Commit `85bb834`)
 - [x] **REPO-03** [Concluído em 19/11/2026] Runner `apps/api/db/migrate.ts` e baseline 100% PostgreSQL 17 puro `apps/api/db/migrations/0001_baseline_schema.sql` (schema `audit` com trigger imutável, tabelas nativas de segurança `users`, `user_sessions`, `user_mfa_factors`, `auth_tokens`, `stored_files`, funções de sessão `current_app_user_id()`/`current_app_tenant_id()`, todas as 56 tabelas de negócio consolidadas incluindo as 10 antes ausentes, catálogo unificado `benefit_catalogs`, 150 triggers de auditoria e imutabilidade, 46 tabelas com RLS habilitada e role `couplerh_app`) + seeds `apps/api/db/seeds/001_system_and_legal_2026.sql` (vigência 2026, 4 faixas INSS, 5 faixas IRRF, 23 rubricas CLT de sistema e feriados nacionais). Validado com 0 erros no container Docker `postgres:17-alpine`. (Commit `de2b681`)
 - [x] **REPO-04** [Concluído em 22/11/2026] Script ETL idempotente `apps/api/db/etl/import_from_legacy.ts` para migração higienizada de dados legados para PostgreSQL 17 puro (mapeando `auth.users` → `public.users` preservando UUIDs, `benefits_catalog` → `benefit_catalogs`, arquivos legados → `stored_files` e documentos) com relatório de reconciliação financeira (divergência R$ 0,00, integridade referencial 100% e 0 registros órfãos), testado e validado no container `postgres:17-alpine` com suite Vitest verde. (Commit `f142033`)
 - [x] **REPO-05** [Concluído em 22/11/2026] Configurado `.github/workflows/ci.yml` com 5 gates bloqueadores (Gate 1: Lint, Gate 2: Typecheck, Gate 3: DB Migrations + Seeds 2026 + ETL Dry-Run em container oficial `postgres:17-alpine`, Gate 4: Testes automatizados unitários/integração, Gate 5: Production Build com upload de artefatos). (Commit `4159e3d`)
-- [ ] **REPO-06** Sincronizar `database.md` e `documentacao.md` do novo repositório com a baseline PostgreSQL 17 puro
+- [x] **REPO-06** [Concluído em 22/11/2026] Sincronizados `database.md`, `documentacao.md` e `fase.md` do novo repositório `CoupleRHVPS` com a baseline PostgreSQL 17 puro, catalogando as 56 tabelas, arquitetura do monorepo, regras financeiras sem ponto flutuante e governança completa. (Commit `d87684a`)
 
-**Gate V0:** Repositório nasce com histórico limpo (`0` referências a Supabase/Vercel/segredos), `0001_baseline_schema.sql` sobe em `postgres:17-alpine` vazio com `0` erros e todos os 5 gates do CI passam verdes.
+**Gate V0 (Aprovado):** Repositório nasce com histórico limpo (`0` referências a Supabase/Vercel/segredos), `0001_baseline_schema.sql` sobe em `postgres:17-alpine` vazio com `0` erros e todos os 5 gates do CI passam 100% verdes.
 
 ---
 
