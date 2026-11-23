@@ -1,11 +1,14 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
+import pg from 'pg';
 import { TokenService, AuthTokenPayload } from './tokenService.js';
 import { MfaService } from './mfaService.js';
 import { dbPool } from '../../shared/db/pool.js';
+import { withTenantContext, withReadOnlyTenantContext, TenantContext } from '../../shared/db/context.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
     user?: AuthTokenPayload;
+    withContext?: <T>(callback: (client: pg.PoolClient) => Promise<T>) => Promise<T>;
   }
 }
 
@@ -84,6 +87,17 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   }
 
   request.user = payload;
+  request.withContext = <T>(callback: (client: pg.PoolClient) => Promise<T>) => {
+    return withTenantContext(
+      {
+        userId: payload.sub,
+        tenantId: payload.tenant_id,
+        role: payload.role,
+        workerId: payload.worker_id,
+      },
+      callback
+    );
+  };
 }
 
 /**
