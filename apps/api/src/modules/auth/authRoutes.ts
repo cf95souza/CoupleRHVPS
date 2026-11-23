@@ -1,7 +1,8 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { AuthService } from './authService.js';
-import { authenticate } from './authMiddleware.js';
+import { PasswordResetService } from './passwordResetService.js';
+import { authenticate, requireAdminRole } from './authMiddleware.js';
 import { dbPool } from '../../shared/db/pool.js';
 import { env } from '../../config/env.js';
 
@@ -13,6 +14,24 @@ const loginAdminSchema = z.object({
 const loginPortalSchema = z.object({
   cpf: z.string().min(11, 'O CPF é obrigatório.'),
   birthDateOrPassword: z.string().min(4, 'A data de nascimento ou senha é obrigatória.'),
+});
+
+const forgotPasswordSchema = z.object({
+  email: z.string().email('E-mail em formato inválido.'),
+});
+
+const resetPasswordVerifySchema = z.object({
+  token: z.string().min(10, 'Token de recuperação inválido.'),
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(10, 'Token de recuperação inválido.'),
+  newPassword: z.string().min(8, 'A nova senha deve ter no mínimo 8 caracteres.'),
+});
+
+const changeWorkerPasswordSchema = z.object({
+  currentBirthDateOrPassword: z.string().min(4, 'Informe a data de nascimento ou senha atual.'),
+  newPassword: z.string().min(6, 'A nova senha deve ter no mínimo 6 caracteres.'),
 });
 
 const mfaVerifySchema = z.object({
@@ -36,6 +55,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
   const authService = new AuthService(dbPool);
   const tokenService = authService.getTokenService();
   const mfaService = authService.getMfaService();
+  const passwordResetService = new PasswordResetService(dbPool);
 
   /**
    * POST /api/v1/auth/login
@@ -507,6 +527,139 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     return {
       success: true,
       message: 'Sessão remota encerrada com sucesso.',
+    };
+  });
+
+  /**
+   * POST /api/v1/auth/forgot-password
+   * Solicitação de recuperação de senha com link assinado e resposta anti-enumeração
+   */
+  app.post('/forgot-password', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '1 minute',
+      },
+    },
+  }, async (request, reply) => {
+    const parseResult = forgotPasswordSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        success: false,
+        error: parseResult.error.errors[0]?.message || 'E-mail inválido.',
+      });
+    }
+
+    const result = await passwordResetService.requestPasswordReset(parseResult.data.email);
+    return result;
+  });
+
+  /**
+   * GET /api/v1/auth/reset-password/verify
+   * Validação prévia de token de recuperação de senha para a tela do frontend
+   */
+  app.get('/reset-password/verify', async (request, reply) => {
+    const parseResult = resetPasswordVerifySchema.safeParse(request.query);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        success: false,
+        error: parseResult.error.errors[0]?.message || 'Token de recuperação não fornecido.',
+      });
+    }
+
+    try {
+      const result = await passwordResetService.verifyResetToken(parseResult.data.token);
+      return {
+        success: true,
+        valid: result.valid,
+        email: result.email,
+        fullName: result.fullName,
+      };
+    } catch (err: any) {
+      return reply.status(400).send({
+        success: false,
+        valid: false,
+        error: err.message || 'Token de recuperação inválido ou expirado.',
+      });
+    }
+  });
+
+  /**
+   * POST /api/v1/auth/reset-password
+   * Efetivação da redefinição de senha com invalidação do token e encerramento de todas as sessões
+   */
+  app.post('/reset-password', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '1 minute',
+      },
+    },
+  }, async (request, reply) => {
+    const parseResult = resetPasswordSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        success: false,
+        error: parseResult.error.errors[0]?.message || 'Dados inválidos.',
+      });
+    }
+
+    try {
+      const result = await passwordResetService.resetPassword(
+        parseResult.data.token,
+        parseResult.data.newPassword
+      );
+      return result;
+    } catch (err: any) {
+      return reply.status(400).send({
+        success: false,
+        error: err.message || 'Falha ao redefinir a senha.',
+      });
+    }
+  });
+
+  /**
+   * POST /api/v1/auth/portal/change-password
+   * Permite ao colaborador autenticado no portal cadastrar/alterar sua senha própria
+   */
+  app.post('/portal/change-password', { preHandler: [authenticate] }, async (request, reply) => {
+    const parseResult = changeWorkerPasswordSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        success: false,
+        error: parseResult.error.errors[0]?.message || 'Dados inválidos.',
+      });
+    }
+
+    try {
+      const result = await passwordResetService.changeWorkerPassword({
+        userId: request.user!.sub,
+        currentBirthDateOrPassword: parseResult.data.currentBirthDateOrPassword,
+        newPassword: parseResult.data.newPassword,
+      });
+      return result;
+    } catch (err: any) {
+      return reply.status(400).send({
+        success: false,
+        error: err.message || 'Falha ao atualizar a senha do portal.',
+      });
+    }
+  });
+
+  /**
+   * GET /api/v1/auth/admin/check-access
+   * Endpoint de validação de acesso restrito ao ambiente administrativo do RH
+   * Bloqueia automaticamente o perfil 'employee' com HTTP 403 FORBIDDEN_EMPLOYEE
+   */
+  app.get('/admin/check-access', { preHandler: [authenticate, requireAdminRole] }, async (request) => {
+    return {
+      success: true,
+      allowed: true,
+      user: {
+        id: request.user!.sub,
+        role: request.user!.role,
+        tenant_id: request.user!.tenant_id,
+      },
     };
   });
 };

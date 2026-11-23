@@ -98,3 +98,17 @@ export async function requireAal2(request: FastifyRequest, reply: FastifyReply) 
     });
   }
 }
+
+/**
+ * Middleware para bloquear acesso de perfis estritamente operacionais (employee) ao ambiente RH
+ */
+export async function requireAdminRole(request: FastifyRequest, reply: FastifyReply) {
+  if (!request.user || request.user.role === 'employee') {
+    return reply.status(403).send({
+      success: false,
+      code: 'FORBIDDEN_EMPLOYEE',
+      error: 'Acesso restrito ao Portal do Colaborador. Perfil sem permissão para o ambiente administrativo de RH.',
+    });
+  }
+}
+
