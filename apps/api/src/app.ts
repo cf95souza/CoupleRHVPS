@@ -8,6 +8,7 @@ import { pinoLoggerConfig } from './shared/logger/pinoLogger.js';
 import { dbPool } from './shared/db/pool.js';
 import { storageRoutes } from './modules/storage/storageRoutes.js';
 import { observabilityRoutes } from './modules/observability/observabilityRoutes.js';
+import { authRoutes } from './modules/auth/authRoutes.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -89,6 +90,9 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // Modulo de Observabilidade e Alertas Operacionais
   await app.register(observabilityRoutes, { prefix: '/api/v1/system' });
+
+  // Modulo de Autenticacao Nativa (RH/Admin e Portal do Colaborador)
+  await app.register(authRoutes, { prefix: '/api/v1/auth' });
 
   return app;
 }
