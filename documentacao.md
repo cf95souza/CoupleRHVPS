@@ -992,3 +992,37 @@ A plataforma deve gerenciar vínculos trabalhistas, documentos, jornadas, folha 
      - Bateria Global do Vitest: **95 arquivos de teste e 692 testes automatizados 100% verdes**.
      - Pipeline `npm run ci` aprovado sem erros de linting (Oxlint), tipagem (TypeScript strict) e build de produção empacotado com êxito.
 
+
+---
+
+### 36. FASE V2 (SEC-04): Middleware Transacional withTenantContext, RLS Nativa e Auditoria Forense
+
+- **Contexto Operacional e Blindagem Multitenant P0**:
+  - Em uma arquitetura PostgreSQL puro sem Supabase, a segurança entre empresas (multitenancy) depende de conexões do pool operando sob uma role sem privilégios de bypass (`couplerh_app` com `NOBYPASSRLS`).
+  - Para garantir isolamento absoluto e auditabilidade forense estrita em todas as operações de banco de dados, o CoupleRH implementou o middleware transacional `withTenantContext` e `withReadOnlyTenantContext` (`apps/api/src/shared/db/context.ts`).
+- **Arquitetura da Solução**:
+  1. **Transacionalidade e Variáveis de Sessão com Escopo Local (`SET LOCAL`)**:
+     - Cada chamada a `withTenantContext(ctx, callback)` adquire uma conexão dedicada do pool.
+     - Executa `BEGIN;` e configura atômica e simultaneamente as 4 variáveis de contexto com `is_local = true`:
+       - `set_config('app.current_user_id', $1, true)`
+       - `set_config('app.current_tenant_id', $2, true)`
+       - `set_config('app.current_role_id', $3, true)`
+       - `set_config('app.current_worker_id', $4, true)`
+     - Como `is_local = true` é equivalente a `SET LOCAL`, ao ocorrer `COMMIT` ou `ROLLBACK`, o PostgreSQL descarta automaticamente as configurações de sessão.
+     - O bloco `finally { client.release(); }` garante que conexões devolvidas ao pool nunca contenham dados residuais de requisições anteriores.
+  2. **Validação Atômica Pré-Transacional de Integridade (`auth_assert_tenant_context_active`)**:
+     - Antes de abrir a transação de negócio, a função `SECURITY DEFINER` `public.auth_assert_tenant_context_active` valida os 3 níveis de permissão:
+       - Usuário global ativo (`users.is_active = TRUE` e `deleted_at IS NULL`), bloqueando com `USER_INACTIVE`.
+       - Tenant corporativo ativo (`tenants.status = 'ACTIVE'` e `deleted_at IS NULL`), bloqueando com `TENANT_INACTIVE`.
+       - Vínculo ativo do usuário no tenant (`tenant_users.is_active = TRUE`), bloqueando com `MEMBERSHIP_INACTIVE`.
+     - Lança `InactiveAccountError` tipado caso qualquer nível esteja inativo.
+  3. **Integração Automática com Triggers de Auditoria Forense (`audit.logs`)**:
+     - O gatilho `audit.audit_trigger_func()` consome `public.current_app_user_id()` e `public.current_app_tenant_id()`.
+     - Toda escrita (`INSERT`, `UPDATE`, `DELETE`) em qualquer uma das 47 tabelas auditadas grava a linha em `audit.logs` com o autor e tenant reais configurados por `withTenantContext`.
+  4. **Modo Somente Leitura (`withReadOnlyTenantContext`)**:
+     - Inicia transação com `BEGIN READ ONLY;`, impedindo qualquer mutação no banco e rejeitando escritas acidentais com erro nativo PostgreSQL.
+  5. **Decorator Fastify (`request.withContext`)**:
+     - Integrado ao middleware `authenticate`, injeta automaticamente `request.withContext(callback)` populado diretamente a partir das claims do JWT (`sub`, `tenant_id`, `role`, `worker_id`).
+  6. **Garantia de Qualidade e Bateria de Testes**:
+     - Suíte `apps/api/tests/tenant-context.test.ts` com 9 testes automatizados cobrindo isolamento concorrente entre tenants, ausência de contaminação do pool, bloqueio atômico de contas/vínculos inativos, captura em `audit.logs`, rollback em falhas e rejeição em transação somente leitura.
+     - Total: **86 testes passando na API** e **102 testes passando no monorepo**.
