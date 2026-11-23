@@ -20,6 +20,14 @@ const envSchema = z.object({
   ALLOWED_ORIGINS: z.string().default('http://localhost:3000,http://127.0.0.1:3000'),
   APP_PUBLIC_URL: z.string().default('http://localhost:3000'),
   ESOCIAL_ENVIRONMENT: z.enum(['PRODUCTION', 'HOMOLOGATION']).default('HOMOLOGATION'),
+  // Configuracoes SMTP Mailer
+  SMTP_HOST: z.string().default('smtp.mailtrap.io'),
+  SMTP_PORT: z.coerce.number().default(587),
+  SMTP_SECURE: z.coerce.boolean().default(false),
+  SMTP_USER: z.string().default('test_user'),
+  SMTP_PASS: z.string().default('test_pass'),
+  SMTP_FROM_NAME: z.string().default('CoupleRH Enterprise'),
+  SMTP_FROM_EMAIL: z.string().default('nao-responda@couplerh.com.br'),
 });
 
 const parsed = envSchema.safeParse(process.env);
