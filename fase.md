@@ -91,18 +91,20 @@ Este documento é o **roteiro oficial de desenvolvimento** da nova versão do **
 
 ---
 
-## 🔒 FASE V2: Autenticação Própria Open-Source (RH + Portal Unificados), MFA TOTP & Blindagem P0
+## 🔒 FASE V2: Autenticação Própria Open-Source (RH/Admin vs Portal do Colaborador Prático), MFA TOTP & Blindagem P0
 **Status:** `[Pendente]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §3 FASE V2 · **BLOQUEADOR DE DADOS REAIS**
 
 - [ ] **SEC-01** Implementar motor de autenticação nativo (`apps/api/src/modules/auth/`): hash **Argon2id**, JWT Access Token curto (15 min) + Refresh Token rotativo em cookie `HttpOnly; Secure; SameSite=Lax` (`user_sessions` com detecção de replay e encerramento remoto de sessões), bloqueio anti-brute-force (`max_login_attempts`) e Rate Limiting Fastify (RFC 6585)
-- [ ] **SEC-02** Implementar **MFA TOTP nativo** (`otplib` RFC 6238, secret criptografado AES-256-GCM, QR Code SVG + códigos de recuperação, desafio AAL2 obrigatório para `require_mfa_roles`) + hook global de **timeout real de sessão** (`session_timeout_minutes`)
-- [ ] **SEC-03** Implementar fluxos seguros de **Convite RH**, **"Esqueceu a Senha?"** e **Portal do Colaborador Unificado** (ativação de 1º acesso com CPF + Nascimento + OTP criando conta real em `users` com `role = 'employee'` e `worker_id`; login CPF/e-mail + senha; **fim definitivo do login `anon` e `localStorage` inseguro**; separação rígida de rotas RH vs `/portal/dashboard`)
+- [ ] **SEC-02** Implementar **MFA TOTP nativo para RH e Gestão** (`otplib` RFC 6238, secret criptografado AES-256-GCM, QR Code SVG + códigos de recuperação, desafio AAL2 restrito a `require_mfa_roles` administrativos) + hook global de **timeout real de sessão** (`session_timeout_minutes`) — *Nota: Portal do Colaborador é 100% isento de MFA para manter usabilidade máxima*
+- [ ] **SEC-03** Implementar as duas jornadas de acesso unificadas e seguras:
+  1. **Jornada RH / Gestão / Admin (`/login`)**: Login corporativo via E-mail + Senha forte + MFA opcional/obrigatório por perfil + fluxo "Esqueceu a Senha?".
+  2. **Jornada Portal do Colaborador Prático (`/portal/login`)**: **Login direto com CPF + Data de Nascimento como Senha padrão** (suporte a `DDMMAAAA` e `DD/MM/AAAA`, validando com `people.birth_date` do cadastro da folha), sem burocracia ou exigência de e-mail corporativo para o trabalhador operacional, emitindo sessão autenticada com `role = 'employee'` e `worker_id` no servidor (**fim definitivo do login `anon` e `localStorage` inseguro**, com proteção server-side anti-brute-force).
 - [ ] **SEC-04** Implementar middleware transacional PostgreSQL `withTenantContext` (`SET LOCAL app.current_user_id / current_tenant_id / current_role_id / current_worker_id`) ativando RLS real e `audit.logs` sob `couplerh_app` com checagem estrita de `is_active = TRUE`
 - [ ] **SEC-05** Estancar 100% das brechas P0 da auditoria: bloquear escalada de privilégio em convite/edição de usuários (remover `dp_analyst` de gestão de usuários/segurança; impedir `tenant_admin` de promover a `system_admin`), corrigir bug `NULL NOT IN` de fechamento/reabertura de folha, autenticar/autorizar todos os endpoints (`payroll`, `termination`, `sign-document`, `time-punch`, `time-ingest` com HMAC `timingSafeEqual` obrigatório + `workers.pis_pasep`, `documents`, `bi`), deixando apenas `/api/v1/public/verify-*` públicos e mascarados
 - [ ] **SEC-06** Criar cliente HTTP tipado `apps/web/src/lib/apiClient.ts` (Bearer em memória + cookie `HttpOnly` + refresh automático sem race condition) e remover definitivamente `src/lib/supabase.ts`
-- [ ] **SEC-07** Executar bateria TDD negativa de segurança P0 (auth, rotação de refresh, MFA AAL2, timeout, escalada, IDOR e storage privado)
+- [ ] **SEC-07** Executar bateria TDD negativa de segurança P0 (auth RH, auth portal CPF + nascimento, rotação de refresh, MFA administrativo, escalada, IDOR e storage privado)
 
-**Gate V2:** Zero acesso anônimo a PII/holerite/ponto/documentos; suíte negativa de segurança prova bloqueio de escalada, IDOR, brute-force e acesso sem MFA quando exigido.
+**Gate V2:** Zero acesso anônimo a PII/holerite/ponto/documentos; portal do colaborador operando perfeitamente com CPF + Data de Nascimento de forma segura no servidor; suíte negativa de segurança prova bloqueio de escalada, IDOR, brute-force e acesso sem MFA para RH quando exigido.
 
 ---
 
