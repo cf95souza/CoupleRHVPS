@@ -1,0 +1,322 @@
+{
+  "tenants": [
+    {
+      "id": "d0000000-0000-0000-0000-000000000001",
+      "name": "Acme Indústria e Comércio LTDA",
+      "status": "ACTIVE",
+      "created_at": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "auth_users": [
+    {
+      "id": "a0000000-0000-0000-0000-000000000001",
+      "email": "admin.rh@acme.com.br",
+      "encrypted_password": "$2b$10$abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLM",
+      "raw_user_meta_data": {
+        "full_name": "Administrador RH Acme",
+        "cpf": "11144477735",
+        "role": "tenant_admin"
+      },
+      "created_at": "2026-01-01T10:00:00.000Z"
+    },
+    {
+      "id": "a0000000-0000-0000-0000-000000000002",
+      "email": "joao.silva@acme.com.br",
+      "encrypted_password": "$2b$10$abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLM",
+      "raw_user_meta_data": {
+        "full_name": "João Pereira da Silva",
+        "cpf": "22233344455",
+        "role": "employee"
+      },
+      "created_at": "2026-01-05T10:00:00.000Z"
+    },
+    {
+      "id": "a0000000-0000-0000-0000-000000000003",
+      "email": "maria.santos@acme.com.br",
+      "encrypted_password": "$2b$10$abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLM",
+      "raw_user_meta_data": {
+        "full_name": "Maria Oliveira dos Santos",
+        "cpf": "33344455566",
+        "role": "employee"
+      },
+      "created_at": "2026-01-10T10:00:00.000Z"
+    }
+  ],
+  "companies": [
+    {
+      "id": "c0000000-0000-0000-0000-000000000001",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "corporate_name": "Acme Indústria e Comércio LTDA",
+      "trade_name": "Acme Tech",
+      "cnpj": "12345678000195",
+      "status": "ACTIVE"
+    }
+  ],
+  "establishments": [
+    {
+      "id": "e0000000-0000-0000-0000-000000000001",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "company_id": "c0000000-0000-0000-0000-000000000001",
+      "name": "Matriz São Paulo",
+      "cnpj": "12345678000195"
+    }
+  ],
+  "departments": [
+    {
+      "id": "b0000000-0000-0000-0000-000000000001",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "company_id": "c0000000-0000-0000-0000-000000000001",
+      "name": "Tecnologia da Informação",
+      "code": "TI"
+    },
+    {
+      "id": "b0000000-0000-0000-0000-000000000002",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "company_id": "c0000000-0000-0000-0000-000000000001",
+      "name": "Recursos Humanos",
+      "code": "RH"
+    }
+  ],
+  "positions": [
+    {
+      "id": "f0000000-0000-0000-0000-000000000001",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "title": "Desenvolvedor de Software Pleno",
+      "cbo": "212405"
+    },
+    {
+      "id": "f0000000-0000-0000-0000-000000000002",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "title": "Analista de Recursos Humanos Pleno",
+      "cbo": "252405"
+    }
+  ],
+  "contract_types": [
+    {
+      "id": "07000000-0000-0000-0000-000000000001",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "name": "CLT Indeterminado",
+      "code": "CLT_IND"
+    }
+  ],
+  "work_shifts": [
+    {
+      "id": "08000000-0000-0000-0000-000000000001",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "name": "Comercial 44h (08:00 - 17:48)",
+      "weekly_hours": 44.0,
+      "schedule_data": [
+        { "day": "monday", "entry1": "08:00", "exit1": "12:00", "entry2": "13:00", "exit2": "17:48" },
+        { "day": "tuesday", "entry1": "08:00", "exit1": "12:00", "entry2": "13:00", "exit2": "17:48" },
+        { "day": "wednesday", "entry1": "08:00", "exit1": "12:00", "entry2": "13:00", "exit2": "17:48" },
+        { "day": "thursday", "entry1": "08:00", "exit1": "12:00", "entry2": "13:00", "exit2": "17:48" },
+        { "day": "friday", "entry1": "08:00", "exit1": "12:00", "entry2": "13:00", "exit2": "17:48" }
+      ]
+    }
+  ],
+  "workers": [
+    {
+      "id": "01000000-0000-0000-0000-000000000001",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "user_id": "a0000000-0000-0000-0000-000000000002",
+      "full_name": "João Pereira da Silva",
+      "cpf": "22233344455",
+      "email": "joao.silva@acme.com.br",
+      "phone": "11988887777",
+      "birth_date": "1992-05-15",
+      "gender": "MASCULINO",
+      "marital_status": "CASADO"
+    },
+    {
+      "id": "01000000-0000-0000-0000-000000000002",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "user_id": "a0000000-0000-0000-0000-000000000003",
+      "full_name": "Maria Oliveira dos Santos",
+      "cpf": "33344455566",
+      "email": "maria.santos@acme.com.br",
+      "phone": "11977776666",
+      "birth_date": "1995-08-20",
+      "gender": "FEMININO",
+      "marital_status": "SOLTEIRO"
+    }
+  ],
+  "contracts": [
+    {
+      "id": "10000000-0000-0000-0000-000000000001",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "worker_id": "01000000-0000-0000-0000-000000000001",
+      "company_id": "c0000000-0000-0000-0000-000000000001",
+      "establishment_id": "e0000000-0000-0000-0000-000000000001",
+      "department_id": "b0000000-0000-0000-0000-000000000001",
+      "position_id": "f0000000-0000-0000-0000-000000000001",
+      "contract_type_id": "07000000-0000-0000-0000-000000000001",
+      "registration_number": "ACME-001",
+      "admission_date": "2024-02-01",
+      "salary_type": "MONTHLY",
+      "base_salary": 5000.00,
+      "monthly_hours": 220.00,
+      "weekly_hours": 44.00,
+      "regime": "CLT",
+      "status": "ACTIVE"
+    },
+    {
+      "id": "10000000-0000-0000-0000-000000000002",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "worker_id": "01000000-0000-0000-0000-000000000002",
+      "company_id": "c0000000-0000-0000-0000-000000000001",
+      "establishment_id": "e0000000-0000-0000-0000-000000000001",
+      "department_id": "b0000000-0000-0000-0000-000000000002",
+      "position_id": "f0000000-0000-0000-0000-000000000002",
+      "contract_type_id": "07000000-0000-0000-0000-000000000001",
+      "registration_number": "ACME-002",
+      "admission_date": "2024-03-01",
+      "salary_type": "MONTHLY",
+      "base_salary": 4000.00,
+      "monthly_hours": 220.00,
+      "weekly_hours": 44.00,
+      "regime": "CLT",
+      "status": "ACTIVE"
+    }
+  ],
+  "benefits_catalog": [
+    {
+      "id": "09000000-0000-0000-0000-000000000001",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "name": "Vale Transporte SP",
+      "benefit_type": "VT",
+      "provider_name": "SPTrans",
+      "code": "VT_SP",
+      "max_deduction_percentage": 6.00
+    },
+    {
+      "id": "09000000-0000-0000-0000-000000000002",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "name": "Vale Refeição Flash",
+      "benefit_type": "VR",
+      "provider_name": "Flash Benefícios",
+      "code": "VR_FLASH",
+      "max_deduction_percentage": 20.00
+    },
+    {
+      "id": "09000000-0000-0000-0000-000000000003",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "name": "Plano de Saúde Bradesco Top",
+      "benefit_type": "HEALTH",
+      "provider_name": "Bradesco Saúde",
+      "code": "HEALTH_BRADESCO",
+      "max_deduction_percentage": 10.00
+    }
+  ],
+  "employee_benefits": [
+    {
+      "id": "09100000-0000-0000-0000-000000000001",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "contract_id": "10000000-0000-0000-0000-000000000001",
+      "benefit_id": "09000000-0000-0000-0000-000000000002",
+      "provider_name": "Flash Benefícios",
+      "start_date": "2024-02-01",
+      "company_cost": 600.00,
+      "employee_discount": 120.00
+    },
+    {
+      "id": "09100000-0000-0000-0000-000000000002",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "contract_id": "10000000-0000-0000-0000-000000000002",
+      "benefit_id": "09000000-0000-0000-0000-000000000001",
+      "provider_name": "SPTrans",
+      "start_date": "2024-03-01",
+      "company_cost": 280.00,
+      "employee_discount": 240.00
+    }
+  ],
+  "time_devices": [
+    {
+      "id": "06000000-0000-0000-0000-000000000001",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "company_id": "c0000000-0000-0000-0000-000000000001",
+      "name": "REP-P Mobile Sede",
+      "kind": "REP_P_MOBILE",
+      "last_nsr": 0,
+      "status": "ACTIVE"
+    }
+  ],
+  "time_bank_accounts": [
+    {
+      "id": "05000000-0000-0000-0000-000000000001",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "company_id": "c0000000-0000-0000-0000-000000000001",
+      "contract_id": "10000000-0000-0000-0000-000000000001",
+      "balance_minutes": 720,
+      "initial_balance_minutes": 0
+    },
+    {
+      "id": "05000000-0000-0000-0000-000000000002",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "company_id": "c0000000-0000-0000-0000-000000000001",
+      "contract_id": "10000000-0000-0000-0000-000000000002",
+      "balance_minutes": -180,
+      "initial_balance_minutes": 0
+    }
+  ],
+  "payroll_periods": [
+    {
+      "id": "04000000-0000-0000-0000-000000000001",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "company_id": "c0000000-0000-0000-0000-000000000001",
+      "year": 2026,
+      "month": 1,
+      "type": "MONTHLY",
+      "status": "APPROVED",
+      "payment_date": "2026-02-05",
+      "competence_date": "2026-01-01"
+    }
+  ],
+  "payslips": [
+    {
+      "id": "03000000-0000-0000-0000-000000000001",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "payroll_period_id": "04000000-0000-0000-0000-000000000001",
+      "contract_id": "10000000-0000-0000-0000-000000000001",
+      "worker_id": "01000000-0000-0000-0000-000000000001",
+      "gross_salary": 5000.00,
+      "total_earnings": 5000.00,
+      "total_deductions": 825.50,
+      "net_salary": 4174.50,
+      "base_inss": 5000.00,
+      "base_irrf": 4486.00,
+      "base_fgts": 5000.00,
+      "fgts_month": 400.00,
+      "status": "APPROVED"
+    },
+    {
+      "id": "03000000-0000-0000-0000-000000000002",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "payroll_period_id": "04000000-0000-0000-0000-000000000001",
+      "contract_id": "10000000-0000-0000-0000-000000000002",
+      "worker_id": "01000000-0000-0000-0000-000000000002",
+      "gross_salary": 4000.00,
+      "total_earnings": 4000.00,
+      "total_deductions": 550.00,
+      "net_salary": 3450.00,
+      "base_inss": 4000.00,
+      "base_irrf": 3612.00,
+      "base_fgts": 4000.00,
+      "fgts_month": 320.00,
+      "status": "APPROVED"
+    }
+  ],
+  "employee_documents": [
+    {
+      "id": "02000000-0000-0000-0000-000000000001",
+      "tenant_id": "d0000000-0000-0000-0000-000000000001",
+      "worker_id": "01000000-0000-0000-0000-000000000001",
+      "contract_id": "10000000-0000-0000-0000-000000000001",
+      "title": "Contrato de Trabalho - João Silva",
+      "category": "CONTRACT",
+      "status": "SIGNED",
+      "file_url": "https://storage.supabase.co/v1/object/public/documents/contrato_joao_silva.pdf",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 104857
+    }
+  ]
+}
