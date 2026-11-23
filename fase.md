@@ -49,8 +49,8 @@ Este documento é o **roteiro oficial de desenvolvimento** da nova versão do **
 | Fase | Escopo Principal | Ref. no Blueprint | Status |
 |---|---|---|---|
 | **V0** | Novo Repositório Git Limpo, Monorepo Open-Source & Baseline PostgreSQL 17 Puro | 📗 Blueprint v2.0 §3 (FASE V0) | `[Concluída]` |
-| **V1** | Infraestrutura VPS Oracle Cloud ARM64 (`postgres:17` + Fastify/`pg-boss` + Caddy + Storage HMAC + Backup OCI) | 📗 Blueprint v2.0 §2 e §3 (FASE V1) | `[Pendente]` |
-| **V2** | Autenticação Própria Open-Source (Argon2id/JWT/Cookie/MFA `otplib`), Portal Unificado & Blindagem P0 | 📗 Blueprint v2.0 §3 (FASE V2) | `[Pendente]` |
+| **V1** | Infraestrutura VPS Oracle Cloud ARM64 (`postgres:17` + Fastify/`pg-boss` + Caddy + Storage HMAC + Backup OCI) | 📗 Blueprint v2.0 §2 e §3 (FASE V1) | `[Concluída]` |
+| **V2** | Autenticação Própria Open-Source (Argon2id/JWT/Cookie/MFA `otplib`), Portal Unificado & Blindagem P0 | 📗 Blueprint v2.0 §3 (FASE V2) | `[Em Andamento]` |
 | **V3** | Controle de Perfis Real (RBAC Dinâmico + Escopo Filial/Depto/CC/Equipe + Sigilo Salarial) & API REST Modular | 📗 Blueprint v2.0 §3 (FASE V3) | `[Pendente]` |
 | **V4** | Saneamento de Todos os Bugs Críticos do Motor Atual (Férias, 13º, Ponto→Folha, T16, Wizard, Rescisão, Guias) | 📗 Blueprint v2.0 §3 (FASE V4) | `[Pendente]` |
 | **V5** | Motor de Folha Enterprise Parte 1 (Worker Lotes/What-If, IRRF Caixa, Pensão Circular ↔ IRRF, Afastamentos, Salário-Família, `indMV`, Estouro `499`/`899`, VT/ANS, CCT) | 📗 Blueprint v2.0 §3 (FASE V5) | `[Pendente]` |
@@ -92,9 +92,9 @@ Este documento é o **roteiro oficial de desenvolvimento** da nova versão do **
 ---
 
 ## 🔒 FASE V2: Autenticação Própria Open-Source (RH/Admin vs Portal do Colaborador Prático), MFA TOTP & Blindagem P0
-**Status:** `[Pendente]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §3 FASE V2 · **BLOQUEADOR DE DADOS REAIS**
+**Status:** `[Em Andamento]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §3 FASE V2 · **BLOQUEADOR DE DADOS REAIS**
 
-- [ ] **SEC-01** Implementar motor de autenticação nativo (`apps/api/src/modules/auth/`): hash **Argon2id**, JWT Access Token curto (15 min) + Refresh Token rotativo em cookie `HttpOnly; Secure; SameSite=Lax` (`user_sessions` com detecção de replay e encerramento remoto de sessões), bloqueio anti-brute-force (`max_login_attempts`) e Rate Limiting Fastify (RFC 6585)
+- [x] **SEC-01** [Concluído em 23/11/2026] Implementado motor de autenticação nativo Fastify (`apps/api/src/modules/auth/`): hash **Argon2id** (`passwordHasher.ts`), JWT Access Token curto (15 min) com HMAC-SHA256 (`jwtHelper.ts`), Refresh Token rotativo de 7 dias com detecção de replay attack e encerramento remoto de sessões (`tokenService.ts`), cookie `HttpOnly; Secure; SameSite=Lax`, bloqueio anti-brute-force (`max_login_attempts = 5` com lock temporário de 15 min), Rate Limiting Fastify por rota (RFC 6585), rotas corporativas (`/login`) e do portal (`/portal/login` com CPF e Data de Nascimento como senha), migrations `0004_auth_users_flexibility.sql` e `0005_auth_helpers.sql` (funções `SECURITY DEFINER` para resolução pré-RLS e provisioning atômico no portal) e suíte automatizada com 13/13 testes Vitest verdes. (Commit `d6b046e`)
 - [ ] **SEC-02** Implementar **MFA TOTP nativo para RH e Gestão** (`otplib` RFC 6238, secret criptografado AES-256-GCM, QR Code SVG + códigos de recuperação, desafio AAL2 restrito a `require_mfa_roles` administrativos) + hook global de **timeout real de sessão** (`session_timeout_minutes`) — *Nota: Portal do Colaborador é 100% isento de MFA para manter usabilidade máxima*
 - [ ] **SEC-03** Implementar as duas jornadas de acesso unificadas e seguras:
   1. **Jornada RH / Gestão / Admin (`/login`)**: Login corporativo via E-mail + Senha forte + MFA opcional/obrigatório por perfil + fluxo "Esqueceu a Senha?".

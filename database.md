@@ -15677,5 +15677,120 @@ CREATE INDEX IF NOT EXISTS idx_operational_alerts_created_at
 GRANT SELECT, INSERT, UPDATE ON public.system_operational_alerts TO couplerh_app;
 ```
 
+### 4.3 Migration `0004_auth_users_flexibility.sql` (Flexibilização de Identidade para Colaboradores)
+```sql
+-- Permite que colaboradores operacionais usem CPF sem obrigatoriedade de e-mail corporativo
+ALTER TABLE public.users ALTER COLUMN email DROP NOT NULL;
+
+-- Garante que o usuário possua ao menos e-mail ou CPF
+ALTER TABLE public.users DROP CONSTRAINT IF EXISTS check_user_identifier;
+ALTER TABLE public.users ADD CONSTRAINT check_user_identifier 
+    CHECK (email IS NOT NULL OR cpf IS NOT NULL);
+
+-- Índice único para login por CPF ativo
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_cpf_unique_active 
+    ON public.users(cpf) 
+    WHERE deleted_at IS NULL AND cpf IS NOT NULL;
+```
+
+### 4.4 Migration `0005_auth_helpers.sql` (Funções SECURITY DEFINER de Autenticação Pré-RLS)
+```sql
+-- 1. Lookup de usuário corporativo por e-mail
+CREATE OR REPLACE FUNCTION public.auth_get_user_for_login(p_email CITEXT)
+RETURNS TABLE (
+    id UUID, email CITEXT, password_hash TEXT, full_name TEXT,
+    failed_login_attempts INT, locked_until TIMESTAMPTZ, is_active BOOLEAN
+) LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+    RETURN QUERY
+    SELECT u.id, u.email, u.password_hash, u.full_name, u.failed_login_attempts, u.locked_until, u.is_active
+    FROM public.users u
+    WHERE u.email = p_email AND u.deleted_at IS NULL;
+END;
+$$;
+
+-- 2. Lookup de tenant e papel do usuário
+CREATE OR REPLACE FUNCTION public.auth_get_user_tenant_membership(p_user_id UUID)
+RETURNS TABLE (tenant_id UUID, tenant_name TEXT, role TEXT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+    RETURN QUERY
+    SELECT tu.tenant_id, t.name as tenant_name, tu.role
+    FROM public.tenant_users tu
+    JOIN public.tenants t ON t.id = tu.tenant_id
+    WHERE tu.user_id = p_user_id AND tu.is_active = TRUE
+    ORDER BY tu.created_at ASC LIMIT 1;
+END;
+$$;
+
+-- 3. Lookup de trabalhador para login no Portal do Colaborador (CPF + Contrato Ativo)
+CREATE OR REPLACE FUNCTION public.auth_get_worker_for_portal_login(p_cpf VARCHAR(11))
+RETURNS TABLE (
+    id UUID, tenant_id UUID, user_id UUID, full_name TEXT, cpf VARCHAR(11),
+    birth_date DATE, email TEXT, contract_status TEXT, position_title TEXT
+) LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+    RETURN QUERY
+    SELECT w.id, w.tenant_id, w.user_id, w.full_name, w.cpf, w.birth_date, w.email,
+           c.status as contract_status, pos.title as position_title
+    FROM public.workers w
+    JOIN public.contracts c ON c.worker_id = w.id
+    LEFT JOIN public.positions pos ON pos.id = c.position_id
+    WHERE w.cpf = p_cpf AND c.status = 'ACTIVE'
+    ORDER BY c.created_at DESC LIMIT 1;
+END;
+$$;
+
+-- 4. Provisioning atômico e vinculação do trabalhador à tabela users e tenant_users
+CREATE OR REPLACE FUNCTION public.auth_ensure_portal_worker_user(
+    p_worker_id UUID, p_tenant_id UUID, p_cpf VARCHAR(11),
+    p_full_name TEXT, p_email TEXT, p_password_hash TEXT
+) RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_user_id UUID;
+BEGIN
+    SELECT user_id INTO v_user_id FROM public.workers WHERE id = p_worker_id;
+    IF v_user_id IS NULL THEN
+        SELECT id INTO v_user_id FROM public.users WHERE cpf = p_cpf;
+    END IF;
+    IF v_user_id IS NULL THEN
+        INSERT INTO public.users (cpf, full_name, email, password_hash, is_active, failed_login_attempts)
+        VALUES (p_cpf, p_full_name, p_email, p_password_hash, TRUE, 0)
+        RETURNING id INTO v_user_id;
+    END IF;
+    UPDATE public.workers SET user_id = v_user_id WHERE id = p_worker_id AND (user_id IS NULL OR user_id <> v_user_id);
+    INSERT INTO public.tenant_users (tenant_id, user_id, role, is_active)
+    VALUES (p_tenant_id, v_user_id, 'employee', TRUE)
+    ON CONFLICT (tenant_id, user_id) DO UPDATE SET is_active = TRUE;
+    UPDATE public.users SET failed_login_attempts = 0, locked_until = NULL, last_login_at = NOW() WHERE id = v_user_id;
+    RETURN v_user_id;
+END;
+$$;
+
+-- 5. Perfil completo para /me
+CREATE OR REPLACE FUNCTION public.auth_get_me(p_user_id UUID)
+RETURNS TABLE (
+    id UUID, email CITEXT, cpf VARCHAR(11), full_name TEXT, phone TEXT,
+    last_login_at TIMESTAMPTZ, tenant_id UUID, role TEXT, tenant_name TEXT, worker_id UUID
+) LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+    RETURN QUERY
+    SELECT u.id, u.email, u.cpf, u.full_name, u.phone, u.last_login_at,
+           tu.tenant_id, tu.role, t.name as tenant_name, w.id as worker_id
+    FROM public.users u
+    LEFT JOIN public.tenant_users tu ON tu.user_id = u.id AND tu.is_active = TRUE
+    LEFT JOIN public.tenants t ON t.id = tu.tenant_id
+    LEFT JOIN public.workers w ON w.user_id = u.id AND w.tenant_id = tu.tenant_id
+    WHERE u.id = p_user_id AND u.is_active = TRUE LIMIT 1;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.auth_get_user_for_login(CITEXT) TO couplerh_app;
+GRANT EXECUTE ON FUNCTION public.auth_get_user_tenant_membership(UUID) TO couplerh_app;
+GRANT EXECUTE ON FUNCTION public.auth_get_worker_for_portal_login(VARCHAR(11)) TO couplerh_app;
+GRANT EXECUTE ON FUNCTION public.auth_ensure_portal_worker_user(UUID, UUID, VARCHAR(11), TEXT, TEXT, TEXT) TO couplerh_app;
+GRANT EXECUTE ON FUNCTION public.auth_get_me(UUID) TO couplerh_app;
+```
+
+
 
 
