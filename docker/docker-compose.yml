@@ -1,0 +1,128 @@
+# ==============================================================================
+# CoupleRH Enterprise — Stack Docker Compose 100% Open-Source
+# Componentes: PostgreSQL 17 Alpine + Fastify 5 API + Caddy 2 Reverse Proxy TLS
+# Alvo: Oracle Cloud Always Free (ARM64 Ampere A1 24 GB RAM) & Docker Desktop Local
+# ==============================================================================
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. Banco de Dados: PostgreSQL 17 Oficial com Tunning para 24 GB RAM
+  # ----------------------------------------------------------------------------
+  couplerh-db:
+    image: postgres:17-alpine
+    container_name: couplerh-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-couplerh_prod}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_root_password_2026}
+      PGDATA: /var/lib/postgresql/data/pgdata
+      TZ: America/Sao_Paulo
+    volumes:
+      - ${COUPLERH_PGDATA_DIR:-couplerh_pgdata}:/var/lib/postgresql/data/pgdata
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./postgres/init-user-db.sh:/docker-entrypoint-initdb.d/init-user-db.sh:ro
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - couplerh-network
+    # Limites de recursos (reserva saudável para VPS 24 GB)
+    deploy:
+      resources:
+        limits:
+          memory: 14G
+        reservations:
+          memory: 2G
+
+  # ----------------------------------------------------------------------------
+  # 2. Servidor Backend: Fastify 5 + pg + pg-boss + Zod + Argon2id
+  # ----------------------------------------------------------------------------
+  couplerh-api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    image: couplerh-api:2.0.0
+    container_name: couplerh-api
+    restart: unless-stopped
+    depends_on:
+      couplerh-db:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 4000
+      HOST: 0.0.0.0
+      DATABASE_URL: ${DATABASE_URL:-postgres://couplerh_app:couplerh_app_password_2026@couplerh-db:5432/couplerh_prod}
+      DATABASE_ADMIN_URL: ${DATABASE_ADMIN_URL:-postgres://postgres:postgres_root_password_2026@couplerh-db:5432/couplerh_prod}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-couplerh_jwt_access_secret_super_secure_key_change_in_production_min_64_chars}
+      JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
+      REFRESH_TOKEN_EXPIRES_DAYS: ${REFRESH_TOKEN_EXPIRES_DAYS:-7}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      STORAGE_HMAC_SECRET: ${STORAGE_HMAC_SECRET:-couplerh_storage_hmac_secret_super_secure_key_change_in_production}
+      STORAGE_BASE_PATH: /var/lib/couplerh/storage
+      TZ: America/Sao_Paulo
+    volumes:
+      - ${COUPLERH_STORAGE_DIR:-couplerh_storage}:/var/lib/couplerh/storage
+    networks:
+      - couplerh-network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 512M
+
+  # ----------------------------------------------------------------------------
+  # 3. Proxy Reverso e Servidor SPA: Caddy 2 com TLS Automático Let's Encrypt
+  # ----------------------------------------------------------------------------
+  couplerh-caddy:
+    image: caddy:2-alpine
+    container_name: couplerh-caddy
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    depends_on:
+      - couplerh-api
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../apps/web/dist:/srv/web:ro
+      - ${COUPLERH_CADDY_DATA_DIR:-couplerh_caddy_data}:/data
+      - ${COUPLERH_CADDY_CONFIG_DIR:-couplerh_caddy_config}:/config
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-contatocoupletech@gmail.com}
+    networks:
+      - couplerh-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 64M
+
+# ------------------------------------------------------------------------------
+# Redes e Volumes Compartilhados
+# ------------------------------------------------------------------------------
+networks:
+  couplerh-network:
+    name: couplerh-network
+    driver: bridge
+
+volumes:
+  couplerh_pgdata:
+    name: couplerh_pgdata
+  couplerh_storage:
+    name: couplerh_storage
+  couplerh_caddy_data:
+    name: couplerh_caddy_data
+  couplerh_caddy_config:
+    name: couplerh_caddy_config

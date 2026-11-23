@@ -1,0 +1,65 @@
+# ==============================================================================
+# CoupleRH Enterprise — Caddyfile (Reverse Proxy, TLS Automático & SPA Server)
+# ==============================================================================
+
+{
+    email {$ACME_EMAIL:contatocoupletech@gmail.com}
+    admin off
+}
+
+{$APP_DOMAIN:localhost} {
+    # Diretório raiz dos arquivos estáticos compilados do React SPA
+    root * /srv/web
+    encode gzip zstd
+
+    # Cabeçalhos de Segurança Estritos (Defense in Depth)
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), payment=()"
+        -Server
+    }
+
+    # Cache Control: Bloquear cache no index.html e version.json para atualizações instantâneas
+    @noCache {
+        path /index.html /version.json
+    }
+    header @noCache Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+
+    # Cache Control: Imutável para bundles com hash de versão
+    @immutableAssets {
+        path /assets/*
+    }
+    header @immutableAssets Cache-Control "public, max-age=31536000, immutable"
+
+    # Proxy Reverso para a API Fastify
+    handle /api/* {
+        reverse_proxy couplerh-api:4000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+
+            # Timeouts generosos para geração de relatórios e cálculos pesados
+            transport http {
+                response_header_timeout 60s
+                read_timeout 60s
+                write_timeout 60s
+            }
+        }
+    }
+
+    # Health check direto para monitoramento (Uptime Kuma, etc.)
+    handle /health {
+        reverse_proxy couplerh-api:4000
+    }
+
+    # Servir arquivos estáticos do frontend e fallback SPA
+    handle {
+        try_files {path} /index.html
+        file_server
+    }
+}
