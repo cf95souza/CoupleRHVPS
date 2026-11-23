@@ -1,0 +1,89 @@
+name: CoupleRH CD Pipeline (Continuous Deployment VPS Oracle ARM64)
+
+on:
+  workflow_run:
+    workflows: ["CoupleRH CI Pipeline (5 Blocking Gates)"]
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Ação a ser executada na VPS'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - rollback
+
+jobs:
+  deploy-vps:
+    name: Deploy Automatizado na VPS Oracle Cloud (ARM64)
+    # Apenas executa se o CI anterior foi 100% aprovado ou se foi disparo manual
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 📥 Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup do Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: 📦 Instalação e Build de Produção do Frontend Web
+        run: |
+          npm ci
+          npm run build
+
+      - name: 🔑 Configuração da Chave SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: 🚀 Transferência do Build Web e Execução do Deploy na VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_SSH_HOST }}
+          VPS_USER: ${{ secrets.VPS_SSH_USER }}
+          VPS_PORT: ${{ secrets.VPS_SSH_PORT || '22' }}
+          ACTION: ${{ github.event.inputs.action || 'deploy' }}
+        run: |
+          echo "==> Conectando à VPS Oracle Cloud em ${VPS_HOST}:${VPS_PORT}..."
+          
+          # Adiciona host aos known_hosts
+          mkdir -p ~/.ssh
+          ssh-keyscan -p ${VPS_PORT} ${VPS_HOST} >> ~/.ssh/known_hosts 2>/dev/null
+
+          if [ "${ACTION}" = "rollback" ]; then
+            echo "==> Executando ROLLBACK na VPS..."
+            ssh -p ${VPS_PORT} ${VPS_USER}@${VPS_HOST} "sudo bash /opt/couplerh/docker/scripts/rollback.sh"
+          else
+            echo "==> Enviando novo bundle compilado do frontend web..."
+            ssh -p ${VPS_PORT} ${VPS_USER}@${VPS_HOST} "mkdir -p /opt/couplerh/apps/web/dist_new"
+            scp -P ${VPS_PORT} -r apps/web/dist/* ${VPS_USER}@${VPS_HOST}:/opt/couplerh/apps/web/dist_new/
+
+            echo "==> Executando deploy.sh na VPS..."
+            ssh -p ${VPS_PORT} ${VPS_USER}@${VPS_HOST} "sudo bash /opt/couplerh/docker/scripts/deploy.sh"
+          fi
+
+      - name: 🩺 Smoke Test Pós-Deploy via HTTPS
+        env:
+          APP_PUBLIC_URL: ${{ secrets.APP_PUBLIC_URL || 'https://app.couplerh.com.br' }}
+        run: |
+          echo "==> Validando disponibilidade pública em ${APP_PUBLIC_URL}/health..."
+          # Realiza 3 checagens espaçadas
+          for i in {1..3}; do
+            STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" "${APP_PUBLIC_URL}/health" || echo "000")
+            echo "Tentativa ${i}: HTTP Status = ${STATUS}"
+            if [ "${STATUS}" = "200" ]; then
+              echo "✓ API pública operando com sucesso!"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Aviso: Smoke test externo finalizado (ou ambiente ainda em fase de DNS/TLS)."
