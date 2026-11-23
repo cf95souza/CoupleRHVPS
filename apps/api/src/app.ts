@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import { env, allowedOriginsList } from './config/env.js';
+import { storageRoutes } from './modules/storage/storageRoutes.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -59,6 +60,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.get('/api/v1/ping', async () => {
     return { pong: true, now: Date.now() };
   });
+
+  // Modulo de Storage Seguro com URLs Assinadas HMAC-SHA256
+  await app.register(storageRoutes, { prefix: '/api/v1/storage' });
 
   return app;
 }
