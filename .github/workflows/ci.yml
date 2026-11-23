@@ -1,0 +1,96 @@
+name: CoupleRH CI Pipeline (5 Blocking Gates)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  ci-gates:
+    name: 5 Gates Bloqueadores (PostgreSQL 17 Oficial)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: couplerh_prod
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_root_password_2026
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      PORT: 4000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgres://couplerh_app:couplerh_app_password_2026@localhost:5432/couplerh_prod
+      DATABASE_ADMIN_URL: postgres://postgres:postgres_root_password_2026@localhost:5432/couplerh_prod
+      JWT_ACCESS_SECRET: couplerh_jwt_access_secret_super_secure_key_change_in_production_min_64_chars
+      JWT_ACCESS_EXPIRES_IN: 15m
+      REFRESH_TOKEN_EXPIRES_DAYS: 7
+      DATA_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      STORAGE_HMAC_SECRET: couplerh_storage_hmac_secret_super_secure_key_change_in_production
+      STORAGE_BASE_PATH: ./storage_data
+
+    steps:
+      - name: 📥 Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup do Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: 📦 Instalação das Dependências do Monorepo
+        run: npm ci
+
+      # -----------------------------------------------------------------------
+      # GATE 1: LINT (Estilo de Código e Boas Práticas)
+      # -----------------------------------------------------------------------
+      - name: 🛡️ Gate 1 — Lint (Monorepo)
+        run: npm run lint
+
+      # -----------------------------------------------------------------------
+      # GATE 2: TYPECHECK (Validação Estrita de Tipos TypeScript)
+      # -----------------------------------------------------------------------
+      - name: 🛡️ Gate 2 — Typecheck (TypeScript)
+        run: npm run typecheck
+
+      # -----------------------------------------------------------------------
+      # GATE 3: DATABASE MIGRATIONS & SEEDS (PostgreSQL 17 Puro)
+      # -----------------------------------------------------------------------
+      - name: 🛡️ Gate 3 — Baseline Migrations, Seeds 2026 & ETL Dry-Run
+        run: |
+          echo "==> Executando runner apps/api/db/migrate.ts com seeds 2026..."
+          npm --workspace=@couplerh/api run migrate -- --seed
+          
+          echo "==> Validando script de ETL legado (Dry-Run com reconciliação R$ 0,00)..."
+          npm --workspace=@couplerh/api run etl:legacy
+
+      # -----------------------------------------------------------------------
+      # GATE 4: TESTES AUTOMATIZADOS (Unitários e de Integração)
+      # -----------------------------------------------------------------------
+      - name: 🛡️ Gate 4 — Testes Automatizados (payroll-core + api)
+        run: npm run test
+
+      # -----------------------------------------------------------------------
+      # GATE 5: BUILD DE PRODUÇÃO (Pacotes Core, API Fastify e Web SPA)
+      # -----------------------------------------------------------------------
+      - name: 🛡️ Gate 5 — Build de Produção (Core, API e Web Vite)
+        run: npm run build
+
+      - name: 📦 Armazenar Artefatos do Frontend Web
+        uses: actions/upload-artifact@v4
+        with:
+          name: couplerh-web-dist
+          path: apps/web/dist
+          retention-days: 7
