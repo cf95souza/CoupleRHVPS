@@ -31,6 +31,11 @@ services:
       start_period: 10s
     networks:
       - couplerh-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
     # Limites de recursos (reserva saudável para VPS 24 GB)
     deploy:
       resources:
@@ -73,6 +78,11 @@ services:
       - ${COUPLERH_STORAGE_DIR:-couplerh_storage}:/var/lib/couplerh/storage
     networks:
       - couplerh-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
     deploy:
       resources:
         limits:
@@ -102,10 +112,40 @@ services:
       ACME_EMAIL: ${ACME_EMAIL:-contatocoupletech@gmail.com}
     networks:
       - couplerh-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
     deploy:
       resources:
         limits:
           memory: 512M
+        reservations:
+          memory: 64M
+
+  # ----------------------------------------------------------------------------
+  # 4. Monitoramento e Observabilidade: Uptime Kuma (~80 MB RAM)
+  # ----------------------------------------------------------------------------
+  couplerh-uptime-kuma:
+    image: louislam/uptime-kuma:1-alpine
+    container_name: couplerh-uptime-kuma
+    restart: unless-stopped
+    ports:
+      - "${UPTIME_KUMA_PORT:-3001}:3001"
+    volumes:
+      - ${COUPLERH_UPTIME_DATA_DIR:-couplerh_uptime_data}:/app/data
+    networks:
+      - couplerh-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
         reservations:
           memory: 64M
 
@@ -126,3 +166,5 @@ volumes:
     name: couplerh_caddy_data
   couplerh_caddy_config:
     name: couplerh_caddy_config
+  couplerh_uptime_data:
+    name: couplerh_uptime_data

@@ -20,6 +20,7 @@ const envSchema = z.object({
   ALLOWED_ORIGINS: z.string().default('http://localhost:3000,http://127.0.0.1:3000'),
   APP_PUBLIC_URL: z.string().default('http://localhost:3000'),
   ESOCIAL_ENVIRONMENT: z.enum(['PRODUCTION', 'HOMOLOGATION']).default('HOMOLOGATION'),
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   // Configuracoes SMTP Mailer
   SMTP_HOST: z.string().default('smtp.mailtrap.io'),
   SMTP_PORT: z.coerce.number().default(587),

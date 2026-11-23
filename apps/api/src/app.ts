@@ -2,22 +2,16 @@ import Fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
+import os from 'os';
 import { env, allowedOriginsList } from './config/env.js';
+import { pinoLoggerConfig } from './shared/logger/pinoLogger.js';
+import { dbPool } from './shared/db/pool.js';
 import { storageRoutes } from './modules/storage/storageRoutes.js';
+import { observabilityRoutes } from './modules/observability/observabilityRoutes.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: env.NODE_ENV === 'development'
-      ? {
-          transport: {
-            target: 'pino-pretty',
-            options: {
-              translateTime: 'HH:MM:ss Z',
-              ignore: 'pid,hostname',
-            },
-          },
-        }
-      : true,
+    logger: pinoLoggerConfig,
   });
 
   // CORS parametrizado via variaveis de ambiente (zero hardcodes)
@@ -46,13 +40,42 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // Rota de Health Check para observabilidade e Uptime Kuma
   app.get('/health', async () => {
+    const dbStart = Date.now();
+    let dbStatus = 'healthy';
+    let dbLatencyMs = 0;
+
+    try {
+      const res = await dbPool.query('SELECT 1 as alive');
+      if (!res.rows || res.rows.length === 0) {
+        dbStatus = 'degraded';
+      }
+      dbLatencyMs = Date.now() - dbStart;
+    } catch {
+      dbStatus = 'unreachable';
+      dbLatencyMs = -1;
+    }
+
+    const mem = process.memoryUsage();
+
     return {
-      status: 'healthy',
+      status: dbStatus === 'healthy' ? 'healthy' : 'degraded',
       system: 'coupleRH Enterprise API',
       version: '2.0.0',
       node_env: env.NODE_ENV,
       timestamp: new Date().toISOString(),
       uptime_seconds: Math.floor(process.uptime()),
+      checks: {
+        database: {
+          status: dbStatus,
+          latency_ms: dbLatencyMs,
+        },
+        memory: {
+          heap_used_mb: Math.round(mem.heapUsed / 1024 / 1024),
+          heap_total_mb: Math.round(mem.heapTotal / 1024 / 1024),
+          rss_mb: Math.round(mem.rss / 1024 / 1024),
+          free_system_ram_mb: Math.round(os.freemem() / 1024 / 1024),
+        },
+      },
     };
   });
 
@@ -63,6 +86,9 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // Modulo de Storage Seguro com URLs Assinadas HMAC-SHA256
   await app.register(storageRoutes, { prefix: '/api/v1/storage' });
+
+  // Modulo de Observabilidade e Alertas Operacionais
+  await app.register(observabilityRoutes, { prefix: '/api/v1/system' });
 
   return app;
 }
