@@ -15791,6 +15791,93 @@ GRANT EXECUTE ON FUNCTION public.auth_ensure_portal_worker_user(UUID, UUID, VARC
 GRANT EXECUTE ON FUNCTION public.auth_get_me(UUID) TO couplerh_app;
 ```
 
+### 4.5 Migration `0006_mfa_and_session_helpers.sql` (Funções SECURITY DEFINER de MFA TOTP e Timeout de Sessão)
+```sql
+-- 1. Status de MFA do usuário
+CREATE OR REPLACE FUNCTION public.auth_get_user_mfa_status(p_user_id UUID)
+RETURNS TABLE (has_verified_mfa BOOLEAN, verified_factors_count INT, total_factors_count INT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+    RETURN QUERY
+    SELECT COALESCE(BOOL_OR(is_verified), FALSE),
+           COUNT(*) FILTER (WHERE is_verified = TRUE)::INT,
+           COUNT(*)::INT
+    FROM public.user_mfa_factors WHERE user_id = p_user_id;
+END;
+$$;
+
+-- 2. Configurações de MFA e timeout de inatividade do tenant
+CREATE OR REPLACE FUNCTION public.auth_get_tenant_mfa_and_session_settings(p_tenant_id UUID)
+RETURNS TABLE (require_mfa_roles TEXT[], session_timeout_minutes INT, max_login_attempts INT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_settings JSONB; v_roles_json JSONB; v_roles TEXT[];
+BEGIN
+    SELECT settings INTO v_settings FROM public.tenants WHERE id = p_tenant_id;
+    IF v_settings IS NULL THEN v_settings := '{}'::jsonb; END IF;
+    v_roles_json := v_settings->'require_mfa_roles';
+    IF v_roles_json IS NOT NULL AND jsonb_typeof(v_roles_json) = 'array' THEN
+        SELECT ARRAY_AGG(x.val::TEXT) INTO v_roles FROM jsonb_array_elements_text(v_roles_json) AS x(val);
+    ELSE
+        v_roles := ARRAY[]::TEXT[];
+    END IF;
+    RETURN QUERY
+    SELECT COALESCE(v_roles, ARRAY[]::TEXT[]),
+           COALESCE((v_settings->>'session_timeout_minutes')::INT, 60),
+           COALESCE((v_settings->>'max_login_attempts')::INT, 5);
+END;
+$$;
+
+-- 3. Validação e heartbeat de inatividade da sessão
+CREATE OR REPLACE FUNCTION public.auth_touch_session_activity(
+    p_session_id UUID, p_max_inactivity_minutes INT DEFAULT 60
+)
+RETURNS TABLE (is_valid BOOLEAN, is_expired BOOLEAN, user_id UUID, aal TEXT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_session RECORD; v_now TIMESTAMPTZ := NOW(); v_inactivity_interval INTERVAL;
+BEGIN
+    SELECT s.id, s.user_id, s.aal, s.last_seen_at, s.expires_at, s.revoked_at
+    INTO v_session FROM public.user_sessions s WHERE s.id = p_session_id;
+
+    IF v_session.id IS NULL OR v_session.revoked_at IS NOT NULL OR v_session.expires_at <= v_now THEN
+        RETURN QUERY SELECT FALSE, TRUE, NULL::UUID, NULL::TEXT;
+        RETURN;
+    END IF;
+
+    v_inactivity_interval := (p_max_inactivity_minutes || ' minutes')::INTERVAL;
+    IF (v_now - v_session.last_seen_at) > v_inactivity_interval THEN
+        UPDATE public.user_sessions SET revoked_at = v_now WHERE id = p_session_id;
+        RETURN QUERY SELECT FALSE, TRUE, v_session.user_id, v_session.aal;
+        RETURN;
+    END IF;
+
+    UPDATE public.user_sessions SET last_seen_at = v_now WHERE id = p_session_id;
+    RETURN QUERY SELECT TRUE, FALSE, v_session.user_id, v_session.aal;
+END;
+$$;
+
+-- 4. Promove sessão para AAL2
+CREATE OR REPLACE FUNCTION public.auth_promote_session_aal2(p_session_id UUID)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+    UPDATE public.user_sessions SET aal = 'aal2', last_seen_at = NOW()
+    WHERE id = p_session_id AND revoked_at IS NULL;
+    RETURN FOUND;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.auth_get_user_mfa_status(UUID) TO couplerh_app;
+GRANT EXECUTE ON FUNCTION public.auth_get_tenant_mfa_and_session_settings(UUID) TO couplerh_app;
+GRANT EXECUTE ON FUNCTION public.auth_touch_session_activity(UUID, INT) TO couplerh_app;
+GRANT EXECUTE ON FUNCTION public.auth_promote_session_aal2(UUID) TO couplerh_app;
+GRANT EXECUTE ON FUNCTION public.auth_get_user_mfa_factors(UUID) TO couplerh_app;
+GRANT EXECUTE ON FUNCTION public.auth_save_mfa_factor(UUID, TEXT, JSONB, TEXT) TO couplerh_app;
+GRANT EXECUTE ON FUNCTION public.auth_get_mfa_factor_for_verification(UUID, UUID) TO couplerh_app;
+GRANT EXECUTE ON FUNCTION public.auth_verify_mfa_factor(UUID, UUID) TO couplerh_app;
+GRANT EXECUTE ON FUNCTION public.auth_consume_recovery_code(UUID, UUID, TEXT) TO couplerh_app;
+GRANT EXECUTE ON FUNCTION public.auth_delete_mfa_factor(UUID, UUID) TO couplerh_app;
+```
+
+
 
 
 
