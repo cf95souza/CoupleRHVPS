@@ -2,9 +2,15 @@ import pg from 'pg';
 import { dbPool as defaultPool } from '../../shared/db/pool.js';
 import { hashPassword, verifyPassword, normalizeCpf, normalizeBirthDate } from '../../shared/security/passwordHasher.js';
 import { TokenService, GeneratedTokens, AuthTokenPayload } from './tokenService.js';
+import { MfaService } from './mfaService.js';
 import { AlertService } from '../../shared/observability/AlertService.js';
 
 export interface AdminLoginResult {
+  mfaRequired?: boolean;
+  mfaEnrolled?: boolean;
+  challengeToken?: string;
+  accessToken?: string;
+  expiresInSeconds?: number;
   user: {
     id: string;
     email: string;
@@ -13,9 +19,9 @@ export interface AdminLoginResult {
   };
   tenant: {
     id: string;
-    name: string;
+    name: string | null;
   } | null;
-  tokens: GeneratedTokens;
+  tokens?: GeneratedTokens;
 }
 
 export interface PortalLoginResult {
@@ -33,6 +39,7 @@ export class AuthService {
   private pool: pg.Pool;
   private tokenService: TokenService;
   private alertService: AlertService;
+  private mfaService: MfaService;
   private readonly maxFailedAttempts = 5;
   private readonly lockDurationMinutes = 15;
 
@@ -40,6 +47,15 @@ export class AuthService {
     this.pool = pool || defaultPool;
     this.tokenService = new TokenService(this.pool);
     this.alertService = new AlertService(this.pool);
+    this.mfaService = new MfaService(this.pool);
+  }
+
+  public getTokenService(): TokenService {
+    return this.tokenService;
+  }
+
+  public getMfaService(): MfaService {
+    return this.mfaService;
   }
 
   /**
@@ -131,7 +147,80 @@ export class AuthService {
     const tenantId = tenantUser?.tenant_id || null;
     const tenantName = tenantUser?.tenant_name || null;
 
-    // 7. Cria sessão e gera par de tokens
+    // 7. Checa status de MFA do usuário e exigências de perfil do tenant
+    const userMfaStatus = await this.mfaService.getUserMfaStatus(user.id);
+    const tenantSettings = await this.mfaService.getTenantSettings(tenantId);
+
+    // Cenário A: Usuário já possui MFA verificado ativo -> Emite challenge temporário
+    if (userMfaStatus.hasVerifiedMfa) {
+      const tokens = await this.tokenService.createSession({
+        userId: user.id,
+        email: user.email,
+        tenantId,
+        role,
+        aal: 'aal1',
+        ipAddress: params.ipAddress,
+        userAgent: params.userAgent,
+      });
+
+      const challengeToken = this.tokenService.issueChallengeToken({
+        userId: user.id,
+        sessionId: tokens.sessionId,
+        email: user.email,
+        tenantId,
+        role,
+      });
+
+      return {
+        mfaRequired: true,
+        mfaEnrolled: true,
+        challengeToken,
+        user: {
+          id: user.id,
+          email: user.email,
+          full_name: user.full_name,
+          role,
+        },
+        tenant: tenantId ? { id: tenantId, name: tenantName } : null,
+      };
+    }
+
+    // Cenário B: Papel exige MFA obrigatório mas o usuário ainda não cadastrou -> Força wizard
+    if (tenantSettings.requireMfaRoles.includes(role)) {
+      const tokens = await this.tokenService.createSession({
+        userId: user.id,
+        email: user.email,
+        tenantId,
+        role,
+        aal: 'aal1',
+        ipAddress: params.ipAddress,
+        userAgent: params.userAgent,
+      });
+
+      const setupToken = this.tokenService.issueSetupOnlyToken({
+        userId: user.id,
+        sessionId: tokens.sessionId,
+        email: user.email,
+        tenantId,
+        role,
+      });
+
+      return {
+        mfaRequired: true,
+        mfaEnrolled: false,
+        accessToken: setupToken,
+        expiresInSeconds: 15 * 60,
+        user: {
+          id: user.id,
+          email: user.email,
+          full_name: user.full_name,
+          role,
+        },
+        tenant: tenantId ? { id: tenantId, name: tenantName } : null,
+      };
+    }
+
+    // Cenário C: MFA não exigido / não ativo -> Login normal
     const tokens = await this.tokenService.createSession({
       userId: user.id,
       email: user.email,
@@ -143,6 +232,8 @@ export class AuthService {
     });
 
     return {
+      mfaRequired: false,
+      mfaEnrolled: false,
       user: {
         id: user.id,
         email: user.email,
@@ -280,9 +371,5 @@ export class AuthService {
       throw new Error('Usuário não encontrado ou inativo.');
     }
     return res.rows[0];
-  }
-
-  public getTokenService(): TokenService {
-    return this.tokenService;
   }
 }

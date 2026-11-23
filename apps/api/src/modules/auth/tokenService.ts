@@ -14,6 +14,7 @@ export interface AuthTokenPayload {
   worker_id?: string | null;
   aal: 'aal1' | 'aal2';
   session_id: string;        // id na tabela user_sessions
+  scope?: 'mfa_challenge' | 'mfa_setup_only';
 }
 
 export interface GeneratedTokens {
@@ -264,5 +265,115 @@ export class TokenService {
    */
   public verifyAccessToken(token: string): AuthTokenPayload {
     return verifyJwt<AuthTokenPayload>(token, env.JWT_ACCESS_SECRET);
+  }
+
+  /**
+   * Emite token temporário restrito para responder ao desafio de MFA (5 minutos)
+   */
+  public issueChallengeToken(params: {
+    userId: string;
+    sessionId: string;
+    email?: string | null;
+    tenantId?: string | null;
+    role: string;
+  }): string {
+    const payload: AuthTokenPayload = {
+      sub: params.userId,
+      email: params.email || null,
+      tenant_id: params.tenantId || null,
+      role: params.role,
+      aal: 'aal1',
+      session_id: params.sessionId,
+      scope: 'mfa_challenge',
+    };
+
+    return signJwt(payload, env.JWT_ACCESS_SECRET, 5 * 60); // 5 minutos
+  }
+
+  /**
+   * Emite token restrito para setup obrigatório de MFA (15 minutos)
+   */
+  public issueSetupOnlyToken(params: {
+    userId: string;
+    sessionId: string;
+    email?: string | null;
+    tenantId?: string | null;
+    role: string;
+  }): string {
+    const payload: AuthTokenPayload = {
+      sub: params.userId,
+      email: params.email || null,
+      tenant_id: params.tenantId || null,
+      role: params.role,
+      aal: 'aal1',
+      session_id: params.sessionId,
+      scope: 'mfa_setup_only',
+    };
+
+    return signJwt(payload, env.JWT_ACCESS_SECRET, 15 * 60); // 15 minutos
+  }
+
+  /**
+   * Emite novo Access Token para uma sessão existente (ex: após elevação para AAL2)
+   */
+  public issueAccessTokenForSession(params: {
+    userId: string;
+    sessionId: string;
+    email?: string | null;
+    cpf?: string | null;
+    tenantId?: string | null;
+    role: string;
+    workerId?: string | null;
+    aal: 'aal1' | 'aal2';
+  }): string {
+    const payload: AuthTokenPayload = {
+      sub: params.userId,
+      email: params.email || null,
+      cpf: params.cpf || null,
+      tenant_id: params.tenantId || null,
+      role: params.role,
+      worker_id: params.workerId || null,
+      aal: params.aal,
+      session_id: params.sessionId,
+    };
+
+    return signJwt(payload, env.JWT_ACCESS_SECRET, 15 * 60);
+  }
+
+  /**
+   * Promove a sessão para AAL2 no banco de dados
+   */
+  public async promoteSessionToAal2(sessionId: string): Promise<boolean> {
+    const res = await this.pool.query<{ auth_promote_session_aal2: boolean }>(
+      'SELECT public.auth_promote_session_aal2($1);',
+      [sessionId]
+    );
+    return Boolean(res.rows[0]?.auth_promote_session_aal2);
+  }
+
+  /**
+   * Atualiza a atividade da sessão e detecta timeout de inatividade
+   */
+  public async touchSessionActivity(
+    sessionId: string,
+    maxInactivityMinutes = 60
+  ): Promise<{ isValid: boolean; isExpired: boolean; userId: string | null; aal: string | null }> {
+    const res = await this.pool.query<{
+      is_valid: boolean;
+      is_expired: boolean;
+      user_id: string | null;
+      aal: string | null;
+    }>(
+      'SELECT * FROM public.auth_touch_session_activity($1, $2);',
+      [sessionId, maxInactivityMinutes]
+    );
+
+    const row = res.rows[0];
+    return {
+      isValid: Boolean(row?.is_valid),
+      isExpired: Boolean(row?.is_expired),
+      userId: row?.user_id || null,
+      aal: row?.aal || null,
+    };
   }
 }
