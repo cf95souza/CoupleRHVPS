@@ -1,0 +1,237 @@
+# Fases de Desenvolvimento — coupleRH v2.0 Enterprise (PostgreSQL 17 Puro + VPS Oracle ARM64)
+
+Este documento é o **roteiro oficial de desenvolvimento** da nova versão do **coupleRH v2.0 Enterprise**, 100% código aberto (**PostgreSQL 17 puro + Node.js 22 / Fastify / `pg-boss` + React 19 / Vite + Caddy 2**), projetado para operar em **VPS Oracle Cloud Always Free (ARM64)** em um **novo repositório Git limpo** e no padrão técnico de **Apdata / TOTVS / ADP**.
+
+---
+
+## 📌 Documento Mestre de Referência (Leitura Obrigatória)
+
+- 🌐 **Novo Repositório Oficial v2.0 (Produção VPS):** `https://github.com/cf95souza/CoupleRHVPS.git` *(nasce de `git init -b main` zerado — jamais fazer push do histórico legado)*
+- 📗 **Especificação Técnica, Arquitetura, Algoritmos, SQL e Critérios TDD:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) *(citado neste roteiro como **📗 Blueprint v2.0**)*
+- 📘 **Controle Contínuo:** [`documentacao.md`](./documentacao.md) e [`database.md`](./database.md)
+
+> **Como saber exatamente onde estamos mexendo:** cada tarefa abaixo traz um código rastreável (`REPO-01`, `VPS-02`, `SEC-03`, `RBAC-02`, `BUG-01`, `FOLHA-03`, `CONT-02`, `PONTO-01`, `ESOC-03`, `ENT-01`...) cuja especificação completa (diagnóstico do legado, arquitetura, algoritmo, schema SQL e critério de aceite TDD) está na seção correspondente de **`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`**.
+
+---
+
+## 🎯 Princípio Central & Regras Absolutas de Engenharia (v2.0)
+
+> **Princípio Central:** Cadastro define a realidade. Regra define o comportamento. Evento registra o que aconteceu. Motor calcula. Folha registra o resultado. Memória explica como o resultado foi obtido.
+
+- 🚫 **ZERO Supabase e ZERO Vercel:** 100% código aberto com **PostgreSQL 17 puro** (`postgres:17-alpine`), API REST/Worker Node.js 22 (Fastify + `pg` + `pg-boss`) e Caddy 2. O browser **nunca** acessa o banco diretamente.
+- 🚫 **NENHUMA regra de cálculo legal** (INSS, IRRF, FGTS, encargos, férias, 13º, rescisão, médias, pensão) no frontend.
+- 🚫 **NUNCA usar `eval()`, `new Function()` ou SQL dinâmico** para fórmulas — apenas AST segura (`RubricFormulaParser`).
+- 🚫 **NUNCA usar `float` para valores monetários** — operar exclusivamente via `money.ts` (centavos inteiros, arredondamento HALF_UP).
+- 🚫 **NUNCA salvar apenas o resultado** — exigir **Memória de Cálculo** auditável em toda rubrica/tributo/convergência.
+- 🚫 **NUNCA alterar folha fechada, ponto original ou `audit.logs`** — imutabilidade por triggers no PostgreSQL 17 e versionamento controlado.
+- 🚫 **NUNCA apagar regras/tabelas legais históricas** — sempre versionar por vigência (`valid_from`/`valid_to`).
+- 🚫 **NUNCA misturar 13º com folha mensal** e **NUNCA tratar FGTS como desconto do empregado**.
+- 🚫 **NUNCA expor PII/salários/CID sem autorização** — defesa em profundidade: API (RBAC + Escopo + DTO) **+** PostgreSQL 17 RLS (`SET LOCAL app.current_*` sob role não-superuser `couplerh_app`).
+- 🚫 **NUNCA copiar o histórico `.git` legado** para o novo repositório (credenciais antigas expostas em `test_db*.js`).
+
+---
+
+## 📋 Protocolo de Execução para o Agente
+
+1. Ao iniciar o desenvolvimento no novo repositório, execute o **Boot Obrigatório (`/skills/*`)** exigido pelo Project Execution Kernel (`ui-design-system/`, `dashboard-layout/`, `responsive-design/`, `code-maturity-assessor/`).
+2. Pegue a **primeira tarefa `[ ]`** da fase atual. Não pule fases nem tarefas, salvo indicação `(paralelizável)`.
+3. **Leia integralmente o item correspondente em [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md)** antes de programar. Escreva os **testes TDD do critério de aceite primeiro**, depois a implementação.
+4. Um item = um commit limpo (`tipo(escopo): descrição [CÓDIGO]`). Rode `npm run ci` (`lint`, `typecheck`, `test`, `build` e `db-migration-check`) antes e depois; **nunca commite com teste vermelho**.
+5. Ao concluir: troque `[ ]` por `[x]`, anote data, commit e resumo; atualize `documentacao.md` e `database.md` (quando houver mudança estrutural no banco).
+6. **Dúvida de regra legal, alíquota ou CCT → pare**, marque `[!]` e registre em **"Pendências para Contador / Jurídico / Infraestrutura"** no fim deste arquivo. Não invente regras legais.
+7. Toda tabela nova deve nascer com: **RLS habilitada (`ENABLE` + `FORCE`) usando `has_permission()` / `can_access_contract()` + `is_active = TRUE` + gatilho `audit.audit_trigger_func()`**.
+8. Só marque uma fase como `[Concluído]` quando **100% dos critérios do Gate** estiverem validados na prática.
+
+---
+
+## 📊 Painel de Progresso — coupleRH v2.0
+
+| Fase | Escopo Principal | Ref. no Blueprint | Status |
+|---|---|---|---|
+| **V0** | Novo Repositório Git Limpo, Monorepo Open-Source & Baseline PostgreSQL 17 Puro | 📗 Blueprint v2.0 §3 (FASE V0) | `[Pendente]` |
+| **V1** | Infraestrutura VPS Oracle Cloud ARM64 (`postgres:17` + Fastify/`pg-boss` + Caddy + Storage HMAC + Backup OCI) | 📗 Blueprint v2.0 §2 e §3 (FASE V1) | `[Pendente]` |
+| **V2** | Autenticação Própria Open-Source (Argon2id/JWT/Cookie/MFA `otplib`), Portal Unificado & Blindagem P0 | 📗 Blueprint v2.0 §3 (FASE V2) | `[Pendente]` |
+| **V3** | Controle de Perfis Real (RBAC Dinâmico + Escopo Filial/Depto/CC/Equipe + Sigilo Salarial) & API REST Modular | 📗 Blueprint v2.0 §3 (FASE V3) | `[Pendente]` |
+| **V4** | Saneamento de Todos os Bugs Críticos do Motor Atual (Férias, 13º, Ponto→Folha, T16, Wizard, Rescisão, Guias) | 📗 Blueprint v2.0 §3 (FASE V4) | `[Pendente]` |
+| **V5** | Motor de Folha Enterprise Parte 1 (Worker Lotes/What-If, IRRF Caixa, Pensão Circular ↔ IRRF, Afastamentos, Salário-Família, `indMV`, Estouro `499`/`899`, VT/ANS, CCT) | 📗 Blueprint v2.0 §3 (FASE V5) | `[Pendente]` |
+| **V6** | Motor de Folha Enterprise Parte 2 (Médias CCT, Férias/13º+Jan Completos, Rescisão Unificada + Complementar, Dissídio + RRA, Multi-Regime, Patronais) | 📗 Blueprint v2.0 §3 (FASE V6) | `[Pendente]` |
+| **V7** | Contabilização Enterprise, Rateios Multi-CC/CNO, Provisões Acumuladas com Baixa, CNAB 240+PIX e Informe | 📗 Blueprint v2.0 §3 (FASE V7) | `[Pendente]` |
+| **V8** | Ponto Eletrônico com Geolocalização Enterprise (Anti-Spoofing, Multi-Local, Mapa, PWA Offline, QR Real) & Portal 2.0 + Aprovação do Gestor | 📗 Blueprint v2.0 §3 (FASE V8) | `[Pendente]` |
+| **V9** | eSocial Real na VPS Oracle (Cofre A1 AES-256-GCM, XML S-1.2/S-1.3, XML-DSig, mTLS SERPRO e Totalizadores) | 📗 Blueprint v2.0 §3 (FASE V9) | `[Pendente]` |
+| **V10** | Notificações Reais, BI & Radar Trabalhista, Admissão Digital, 100+ Golden E2E & Cutover Controlado | 📗 Blueprint v2.0 §3 (FASE V10) | `[Pendente]` |
+
+---
+
+## 🧹 FASE V0: Novo Repositório Git Limpo, Monorepo Open-Source & Baseline PostgreSQL 17 Puro
+**Status:** `[Pendente]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §3 FASE V0
+
+- [x] **REPO-01** [Concluído em 19/11/2026] Novo repositório limpo criado em `D:\Repositorios\CoupleRHVPS` via `git init -b main` conectado a `https://github.com/cf95souza/CoupleRHVPS.git`; histórico `.git` legado isolado (protegendo credenciais); `.gitignore` estrito configurado; remoção completa de `supabase/`, scripts soltos, `vercel.json` e dependência `@supabase/supabase-js`. (Commit `35e1c67`)
+- [x] **REPO-02** [Concluído em 19/11/2026] Monorepo open-source estruturado (`packages/payroll-core` com TypeScript puro, `money.ts` HALF_UP e 16 testes unitários verdes; `apps/api` Fastify 5 + Zod + pg + pool com health check e testes verdes; `apps/web` React 19 + Vite 8 + Tailwind 4 compilando limpo em `dist/` com `apiClient.ts` e `src/config/env.ts` sem hardcodes; `npm run ci` 100% verde). (Commit `85bb834`)
+- [x] **REPO-03** [Concluído em 19/11/2026] Runner `apps/api/db/migrate.ts` e baseline 100% PostgreSQL 17 puro `apps/api/db/migrations/0001_baseline_schema.sql` (schema `audit` com trigger imutável, tabelas nativas de segurança `users`, `user_sessions`, `user_mfa_factors`, `auth_tokens`, `stored_files`, funções de sessão `current_app_user_id()`/`current_app_tenant_id()`, todas as 56 tabelas de negócio consolidadas incluindo as 10 antes ausentes, catálogo unificado `benefit_catalogs`, 150 triggers de auditoria e imutabilidade, 46 tabelas com RLS habilitada e role `couplerh_app`) + seeds `apps/api/db/seeds/001_system_and_legal_2026.sql` (vigência 2026, 4 faixas INSS, 5 faixas IRRF, 23 rubricas CLT de sistema e feriados nacionais). Validado com 0 erros no container Docker `postgres:17-alpine`. (Commit `de2b681`)
+- [x] **REPO-04** [Concluído em 22/11/2026] Script ETL idempotente `apps/api/db/etl/import_from_legacy.ts` para migração higienizada de dados legados para PostgreSQL 17 puro (mapeando `auth.users` → `public.users` preservando UUIDs, `benefits_catalog` → `benefit_catalogs`, arquivos legados → `stored_files` e documentos) com relatório de reconciliação financeira (divergência R$ 0,00, integridade referencial 100% e 0 registros órfãos), testado e validado no container `postgres:17-alpine` com suite Vitest verde. (Commit `f142033`)
+- [x] **REPO-05** [Concluído em 22/11/2026] Configurado `.github/workflows/ci.yml` com 5 gates bloqueadores (Gate 1: Lint, Gate 2: Typecheck, Gate 3: DB Migrations + Seeds 2026 + ETL Dry-Run em container oficial `postgres:17-alpine`, Gate 4: Testes automatizados unitários/integração, Gate 5: Production Build com upload de artefatos). (Commit `4159e3d`)
+- [ ] **REPO-06** Sincronizar `database.md` e `documentacao.md` do novo repositório com a baseline PostgreSQL 17 puro
+
+**Gate V0:** Repositório nasce com histórico limpo (`0` referências a Supabase/Vercel/segredos), `0001_baseline_schema.sql` sobe em `postgres:17-alpine` vazio com `0` erros e todos os 5 gates do CI passam verdes.
+
+---
+
+## ☁️ FASE V1: Infraestrutura VPS Oracle Cloud Always Free (ARM64) — 100% Open-Source
+**Status:** `[Pendente]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §2 e §3 FASE V1
+
+- [ ] **VPS-01** Provisionar e endurecer instância Oracle `VM.Standard.A1.Flex` (Ubuntu 24.04 ARM64, 4 OCPU / 24 GB RAM / 200 GB SSD): OCI Security List + `ufw` apenas 80/443, SSH por chave + Tailscale/WireGuard, `fail2ban`, `chrony` NTP `America/Sao_Paulo`, Docker + Compose v2 ARM64
+- [ ] **VPS-02** Configurar `docker/docker-compose.yml` 100% open-source (3 containers core: `postgres:17-alpine` tunado para 24 GB RAM com role não-superuser `couplerh_app`, `couplerh-api` Node 22 Fastify + `pg-boss`, `caddy:2-alpine` TLS automático servindo `dist/` SPA com `Cache-Control: no-store` em `/index.html` e `/version.json`)
+- [ ] **VPS-03** Implementar `StorageService` (`LocalFsStorageAdapter` em `/var/lib/couplerh/storage/{tenant_id}/{worker_id}/...` + `stored_files` + validação path traversal/MIME + download seguro via URLs assinadas HMAC-SHA256 expirando em 5 min)
+- [ ] **VPS-04** Configurar `MailerService` (`nodemailer` SMTP TLS porta 587/465 — SES/Brevo/Resend/Postmark + SPF/DKIM/DMARC) com templates HTML PT-BR e fila `pg-boss`
+- [ ] **VPS-05** Implementar Backup 3-2-1 automatizado (`docker/scripts/backup.sh`: `pg_dump -Fc` a cada 6h + criptografia `age` + `rclone sync` do DB e Storage para OCI Object Storage Always Free 20 GB) + `restore-drill.sh` semanal testado
+- [ ] **VPS-06** Configurar observabilidade leve (logs Pino sanitizados LGPD, rotação Docker, Uptime Kuma monitorando `/health`, TLS, RAM/CPU/disco, alertas em `system_operational_alerts`)
+- [ ] **VPS-07** Configurar pipeline CD `.github/workflows/deploy-vps.yml` (deploy pós-CI verde com migrations transacionais, swap atômico de `dist/`, restart controlado da API, smoke test `/health` e runbook de rollback)
+
+**Gate V1:** Stack 100% open-source operando em HTTPS na VPS Oracle ARM64 consumindo `< 2 GB` RAM em idle, `couplerh_app` sujeita a RLS, SMTP validado, Storage privado com URLs HMAC e Restore Drill 100% aprovado.
+
+---
+
+## 🔒 FASE V2: Autenticação Própria Open-Source (RH + Portal Unificados), MFA TOTP & Blindagem P0
+**Status:** `[Pendente]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §3 FASE V2 · **BLOQUEADOR DE DADOS REAIS**
+
+- [ ] **SEC-01** Implementar motor de autenticação nativo (`apps/api/src/modules/auth/`): hash **Argon2id**, JWT Access Token curto (15 min) + Refresh Token rotativo em cookie `HttpOnly; Secure; SameSite=Lax` (`user_sessions` com detecção de replay e encerramento remoto de sessões), bloqueio anti-brute-force (`max_login_attempts`) e Rate Limiting Fastify (RFC 6585)
+- [ ] **SEC-02** Implementar **MFA TOTP nativo** (`otplib` RFC 6238, secret criptografado AES-256-GCM, QR Code SVG + códigos de recuperação, desafio AAL2 obrigatório para `require_mfa_roles`) + hook global de **timeout real de sessão** (`session_timeout_minutes`)
+- [ ] **SEC-03** Implementar fluxos seguros de **Convite RH**, **"Esqueceu a Senha?"** e **Portal do Colaborador Unificado** (ativação de 1º acesso com CPF + Nascimento + OTP criando conta real em `users` com `role = 'employee'` e `worker_id`; login CPF/e-mail + senha; **fim definitivo do login `anon` e `localStorage` inseguro**; separação rígida de rotas RH vs `/portal/dashboard`)
+- [ ] **SEC-04** Implementar middleware transacional PostgreSQL `withTenantContext` (`SET LOCAL app.current_user_id / current_tenant_id / current_role_id / current_worker_id`) ativando RLS real e `audit.logs` sob `couplerh_app` com checagem estrita de `is_active = TRUE`
+- [ ] **SEC-05** Estancar 100% das brechas P0 da auditoria: bloquear escalada de privilégio em convite/edição de usuários (remover `dp_analyst` de gestão de usuários/segurança; impedir `tenant_admin` de promover a `system_admin`), corrigir bug `NULL NOT IN` de fechamento/reabertura de folha, autenticar/autorizar todos os endpoints (`payroll`, `termination`, `sign-document`, `time-punch`, `time-ingest` com HMAC `timingSafeEqual` obrigatório + `workers.pis_pasep`, `documents`, `bi`), deixando apenas `/api/v1/public/verify-*` públicos e mascarados
+- [ ] **SEC-06** Criar cliente HTTP tipado `apps/web/src/lib/apiClient.ts` (Bearer em memória + cookie `HttpOnly` + refresh automático sem race condition) e remover definitivamente `src/lib/supabase.ts`
+- [ ] **SEC-07** Executar bateria TDD negativa de segurança P0 (auth, rotação de refresh, MFA AAL2, timeout, escalada, IDOR e storage privado)
+
+**Gate V2:** Zero acesso anônimo a PII/holerite/ponto/documentos; suíte negativa de segurança prova bloqueio de escalada, IDOR, brute-force e acesso sem MFA quando exigido.
+
+---
+
+## 🛡️ FASE V3: Controle de Perfis Real (RBAC Dinâmico + Escopo + Sigilo Salarial) & API REST Modular
+**Status:** `[Pendente]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §3 FASE V3
+
+- [ ] **RBAC-01** Expandir catálogo para ~28 permissões granulares (`permissions` / `roles` / `role_permissions`), criar função SQL `public.has_permission(p_tenant_id, p_slug)` baseada em `current_app_user_id()` e middleware Fastify `requirePermission(...)`, eliminando hardcodes de enum e o bug de perfis customizados (`resolveRoleEnum`)
+- [ ] **RBAC-02** Implementar **Escopo Organizacional Multidimensional**: `manager_worker_id` em contratos/deptos/setores, `scope_mode` (`ALL`, `RESTRICTED`, `OWN_TEAM`, `SELF_ONLY`), tabela `public.tenant_user_scopes` (`COMPANY`, `DEPARTMENT`, `SECTOR`, `COST_CENTER`, `WORKPLACE`), função SQL `public.can_access_contract()` e seletor visual de escopo no cadastro de usuários
+- [ ] **RBAC-03** Aplicar políticas RLS nativas PostgreSQL 17 (`ENABLE` + `FORCE ROW LEVEL SECURITY`) em 100% das tabelas críticas combinando `has_permission()`, `can_access_contract()` e `is_active = TRUE` + `append-only` em `audit.logs`, `time_punch_records`, `signatures_log` e `document_events`
+- [ ] **RBAC-04** Implementar **Sigilo Salarial, Folha Confidencial (Diretoria) e Mascaramento LGPD Real**: flag `is_confidential_payroll` em contratos; serializers/DTOs no servidor e views SQL suprimindo `base_salary`/reajustes/holerites sem `view_salaries` (e diretoria sem `view_executive_payroll`), mascarando CPF/PIS/PIX sem `view_pii_unmasked` e ocultando CID-10 sem `view_medical_cid`
+- [ ] **RBAC-05** Construir módulos REST validados com Zod em `apps/api/src/modules/*` (`org`, `employees`, `vacations`, `leaves`, `benefits`, `loans`, `payroll`, `time-tracking`, `documents`, `sst`, `esocial`, `settings`, `audit`, `portal`, `public-verify`) e migrar todos os 95 arquivos do frontend para `apiClient` (zero SQL saindo do browser!)
+- [ ] **RBAC-06** Blindar 100% da interface: `AuthContext` hidratado via `/api/v1/auth/me`, `CompanyContext` filtrado pelo escopo, `<RequirePermission>` em todas as 50+ rotas (remover rota duplicada `/cargos`), página `403 Acesso Restrito`, `DashboardLayout` filtrando `NAV_SECTIONS` e ocultando seções vazias, e `<Can permission="...">` em abas/botões/campos sensíveis
+- [ ] **RBAC-07** Reconstruir tela de Perfis e Acessos (`/configuracoes`): matriz interativa de permissões por módulo, criação/clonagem de perfis customizados, editor de escopo organizacional e painel de sessões ativas com revogação remota
+- [ ] **RBAC-08** Suíte automatizada de Matriz de Isolamento (2 tenants × 8 papéis padrão + 2 perfis customizados validando API + PostgreSQL 17 RLS + UI)
+
+**Gate V3:** Cada usuário só vê no menu, nas rotas, nas telas, na API e no PostgreSQL 17 **estritamente** os módulos, empresas, setores/equipes e dados salariais/médicos permitidos ao seu perfil; zero `@supabase/supabase-js` no projeto.
+
+---
+
+## 🔧 FASE V4: Saneamento de Todos os Bugs Críticos do Motor Atual
+**Status:** `[Pendente]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §3 FASE V4
+
+- [ ] **BUG-01** Corrigir `ReferenceError: fixedEventsByContract` na folha `VACATION` + fluxo do `Vacations/Wizard.tsx` (`status: 'DRAFT'` + aprovação + `toast.success` em Férias e Offboarding)
+- [ ] **BUG-02** Corrigir `TypeError: sumMoney` → `addMoney` na consolidação T16 de INSS
+- [ ] **BUG-03** Incluir rubrica `903` na `THIRTEENTH_1` (fim do erro 422) + corrigir duplo FGTS na `THIRTEENTH_2` (FGTS diferencial exato sem tributar 2x a 1ª parcela)
+- [ ] **BUG-04** Corrigir integração Ponto → Folha e Eventos Variáveis por quantidade (`amount: null` vs `0` no banco e no `PayrollEngine` para não zerar HE, Noturno, Faltas e Atrasos)
+- [ ] **BUG-05** Unificar catálogo de variáveis em `packages/payroll-core/src/variablesCatalog.ts` (PT-BR único entre `PayrollContext`, `rubricWizardService` e API)
+- [ ] **BUG-06** Eliminar hardcodes `5000`/`7350` no `IRRFCalculator` (100% guiado por vigência em `general_legal_parameters`), remover fallbacks `1621.0`, corrigir 1/3 (`33.3333` → `divideMoney(val, 3)`) e clamping `>= 0` nas bases legais
+- [ ] **BUG-07** Remover códigos hardcoded conflitantes (`101`/`150`/`806`) e regex numérica no `DAGResolver`; propagar `integra_dsr`/`irrf_mode`/`media_*`; corrigir `BASE_HORA_EXTRA` (salário integral Súmula 264 TST + separação de `BASE_HORA_EXTRA_NOTURNA`)
+- [ ] **BUG-08** Corrigir bugs imediatos da rescisão (dupla dedução INSS no IRRF, projeção Dez→Jan e > 1 avo, dependentes e datas sem `toISOString()`)
+- [ ] **BUG-09** Corrigir bugs satélites: `fetchPeriodTaxGuides` (selecionar `id` de `payslips` corrigindo guias zeradas), pré-folha (`leaves` + filtro `company_id`), backup (`lgpd_data_sharing_registry`), `Payslips.tsx` (filtro empresa), `save_payroll_period` (`legal_version_id`, `rubric_version_id` e incremento `payslips.version`) e FGTS 2% aprendiz real na agregação patronal
+- [ ] **BUG-10** Filtrar `holidays` por `tenant_id` + âmbito (Nacional/UF/Município IBGE da lotação), respeitar `total_limit` em deduções percentuais e eliminar qualquer truncamento de 1.000 linhas via `pg` direto
+
+**Gate V4:** Férias, 13º (1ª e 2ª), Ponto→Folha, Consolidação INSS T16, Wizard de Rubricas, Rescisão e Guias Tributárias passando 100% em testes de integração E2E sobre PostgreSQL 17.
+
+---
+
+## ⚙️ FASE V5: Motor de Cálculo Enterprise — Parte 1 (Padrão Apdata / TOTVS / ADP)
+**Status:** `[Pendente]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §3 FASE V5
+
+- [ ] **FOLHA-01** **Worker Assíncrono em Lotes (`payroll_calculation_jobs` + `pg-boss`) + Simulação *What-If* em Lote:** chunks de 50 contratos, progresso em tempo real, watchdog anti-deadlock `CALCULATING` e simulador de reajustes/cenários sem tocar em `payslips`
+- [ ] **FOLHA-02** **IRRF em Regime de Caixa (Lei 7.713/88 / IN RFB 1.500):** `payment_date` em `payroll_periods`, ledger `irrf_cash_ledger`, consolidação mensal por data de pagamento (5º dia útil + adiantamento/complementar), buckets exclusivos (Férias, 13º, PLR, RRA) e memória detalhada
+- [ ] **FOLHA-03** **Pensão Alimentícia Enterprise (Solver Circular Pensão ↔ IRRF + Multi-Beneficiário):** tabela `alimony_beneficiaries`, algoritmo iterativo de ponto fixo (tolerância R\$ 0,01) para pensão sobre líquido (`Bruto - INSS - IRRF`) com trace na memória, múltiplos beneficiários com dados bancários/PIX e `payslip_alimony_splits`
+- [ ] **FOLHA-04** **Integração Completa de Afastamentos (`leaves` — Tabela 18 eSocial):** `LeaveImpactCalculator` cobrindo Auxílio-Doença (15d empresa + soma atestados mesma CID em 60d + INSS a partir 16º dia), Acidente de Trabalho (**FGTS mantido obrigatório** + estabilidade 12m), Licença-Maternidade (120/180d + **dedução automática DCTFWeb**), Serviço Militar (FGTS mantido), licença sem vencimentos, reflexo em 13º e perda de aquisitivo de férias (>180d — CLT art. 133 IV)
+- [ ] **FOLHA-05** **Salário-Família Automático + Dedução DCTFWeb:** `FamilyAllowanceCalculator` sobre remuneração bruta INSS ≤ teto, filhos ≤ 14 anos ou inválidos, vacina/escola, proporcionalidade na admissão/demissão, rubrica `305` e abatimento automático na DCTFWeb
+- [ ] **FOLHA-06** **Múltiplos Vínculos (INSS Outro Empregador — `indMV` 1/2/3):** tabela `employee_other_employments` + consolidação de múltiplas matrículas do mesmo CPF no grupo econômico até o teto previdenciário
+- [ ] **FOLHA-07** **Fila de Prioridade Legal de Descontos, Margem Consignável 35% e Insuficiência de Saldo (`499`/`899`):** `discount_priority` nas rubricas, trava 35% + baixa automática de parcelas de `employee_loans`, política de estouro gerando `499` (provento neutro) + agendamento automático `899` na competência seguinte
+- [ ] **FOLHA-08** **Benefícios Enterprise:** teto legal VT (`MIN(6% salário proporcional, valor efetivo concedido)` — Lei 7.418/85), proporcionalidade em férias/faltas/home-office, Plano de Saúde/Odonto por titular + dependentes + código ANS e importação CSV de coparticipação
+- [ ] **FOLHA-09** **Sindicatos e Convenções Coletivas (CCT):** tabelas `unions` e `collective_agreements` (data-base, piso, % HE escalonada, %/horário noturno, base insalubridade por CCT, ATS anuênio/triênio/quinquênio, regras de médias e estabilidade pós-férias) integradas ao motor
+
+**Gate V5:** Suíte TDD + casos dourados conferidos pelo contador provando IRRF Caixa, convergência exata Pensão ↔ IRRF, afastamentos com FGTS/maternidade, Salário-Família, `indMV`, estouro `499`/`899`, teto VT e CCT.
+
+---
+
+## 🧮 FASE V6: Motor de Cálculo Enterprise — Parte 2 (Médias, Férias, 13º, Rescisão, Dissídio e Multi-Regime)
+**Status:** `[Pendente]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §3 FASE V6
+
+- [ ] **FOLHA-10** **Motor de Médias Configurável por CCT (`AveragesCalculator`):** janelas configuráveis (aquisitivo, 12m, 6m, melhor média), quantidade de horas valorizada pelo salário atual (Súmula 347 TST) vs valor monetário atualizado + reflexo DSR com memória mês a mês alimentando Férias, 13º e Rescisão
+- [ ] **FOLHA-11** **Férias Enterprise:** redução automática por faltas no aquisitivo (CLT art. 130), validação fracionamento (14+5+5 e vedação 2d antes feriado/DSR), férias em dobro (CLT art. 137 isenta de encargos), férias partidas entre meses (rateio INSS/FGTS por competência vs IRRF caixa), férias coletivas em lote (CLT arts. 139–140) e médias automáticas
+- [ ] **FOLHA-12** **13º Salário Enterprise:** avos com faltas/afastamentos, médias automáticas, tributação exclusiva, FGTS diferencial sem duplicidade, pensão sobre 13º, 13º maternidade dedutível e **13º Complementar em Janeiro** (Decreto 10.854/2021 art. 79)
+- [ ] **FOLHA-13** **Motor de Rescisão Unificado ao `PayrollEngine` + Rescisão Complementar:** TRCT gerado pelo motor oficial com memória auditável cobrindo todos os motivos CLT/eSocial, aviso Lei 12.506/2011 (trabalhado/indenizado/misto NT 184/2012), férias vencidas/dobro/proporcionais via `vacation_vesting_periods`, médias automáticas, Art. 9º trintídio data-base, quitação banco de horas como HE, teto Art. 477 §5º, multa FGTS sobre saldo real e **Rescisão Complementar**
+- [ ] **FOLHA-14** **Folha Complementar e Dissídio Coletivo Retroativo Multi-Competência + RRA:** recálculo diferencial mês a mês desde a data-base (reflexos em HE/DSR/Férias/13º, INSS/FGTS por competência de origem e IRRF Caixa ou **RRA Art. 12-A** para anos anteriores) com breakdown para `ideADC` do eSocial
+- [ ] **FOLHA-15** **Categorias Especiais de Vínculos (Multi-Regime eSocial):** Pró-Labore (11% fixo até teto, sem FGTS, 20% patronal sem RAT/Terceiros), Autônomo/RPA (11%, base reduzida transporte 20%/60%, SEST/SENAT, ISS), Estagiário (Lei 11.788 + recesso remunerado), Intermitente (Art. 452-A + alerta complementação INSS) e Horista/Comissionista Puro (DSR separado + garantia mínima)
+- [ ] **FOLHA-16** **Encargos Patronais Avançados:** CPRB proporcional (receita mista) + reoneração gradual Lei 14.973/2024, RAT adicional aposentadoria especial (6%/9%/12%), deduções Salário-Família/Maternidade na DCTFWeb e eliminação total de encargos calculados no frontend
+
+**Gate V6:** Motor cobre todo o espectro trabalhista brasileiro com 0 divergência contra planilhas oficiais de validação contábil.
+
+---
+
+## 📊 FASE V7: Contabilização Enterprise, Rateios, Provisões Reais, Bancos e Obrigações
+**Status:** `[Pendente]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §3 FASE V7
+
+- [ ] **CONT-01** **Rateio Multi-CC, Projetos, Tomadores (Lei 9.711/98) e Obras CNO (S-1020):** `contract_cost_allocations` (soma 100%) e `payslip_cost_allocations` rateando proventos, encargos e provisões sem perda de centavos
+- [ ] **CONT-02** **Provisões Contábeis Reais Acumuladas com Baixa Mensal:** `accounting_provisions_ledger` (saldo anterior + avo mensal + reajuste/médias − baixas reais de férias/13º/rescisão = lançamento líquido contábil do mês)
+- [ ] **CONT-03** **Motor Contábil Parametrizável + Exportadores ERP:** plano de contas editável (`accounting_chart_of_accounts` / `accounting_mapping_rules`), partidas dobradas `D === C` e exportação nos leiautes **Domínio, Alterdata, TOTVS Protheus, Senior e CSV configurável**
+- [ ] **CONT-04** **CNAB 240 Completo (Bancos + PIX/TED + Pensão + Retorno):** Segmentos A e B no backend, leiautes multi-banco, pagamento separado dos pensionistas (`payslip_alimony_splits`) e importador de `.ret` conciliando liquidação bancária
+- [ ] **CONT-05** **Informe de Rendimentos Completo (Quadros 1–7 RFB) & Painel de Conciliação DCTFWeb / FGTS Digital:** incluindo pensão por beneficiário/CPF, previdência privada, plano de saúde por titular/dependente/ANS, RRA e PLR
+
+**Gate V7:** Contabilidade fecha `D === C`, provisão acumulada bate com passivo real, CNAB 240 valida em homologador bancário e Informe de Rendimentos confere integralmente.
+
+---
+
+## 📍 FASE V8: Ponto Eletrônico com Geolocalização Enterprise & Portal do Colaborador 2.0
+**Status:** `[Pendente]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §3 FASE V8
+
+- [ ] **PONTO-01** **Endpoint Único `/api/v1/time-tracking/punch` + Anti-Spoofing GPS:** JWT + ownership + contrato `ACTIVE`, debounce 60s, IP real via Caddy, `receipt_code` exclusivo server-side, validação de `accuracy_meters` máxima, detecção de `accuracy === 0` e teletransporte/velocidade impossível (`fraud_flags`)
+- [ ] **PONTO-02** **Múltiplos Locais Permitidos (`contract_allowed_workplaces`) + Mapa/Auditoria GPS no RH:** autorizar 1..N locais ou externo auditável + exibição na `TimeManagement.tsx` de status geofence, distância, precisão e modal de mapa (Leaflet/OpenStreetMap gratuito) com raio vs ponto da batida
+- [ ] **PONTO-03** **PWA Real + Modo Offline Resiliente para Ponto Mobile:** `vite-plugin-pwa`, ícones PNG 192/512, Service Worker e fila IndexedDB sincronizando ao reconectar gravando `sync_origin = 'OFFLINE_PWA'`, `device_timestamp` e `server_received_at` separados
+- [ ] **PONTO-04** **Comprovante REP-P com QR Code Real + `/verificar-ponto` + Selfie Opcional LGPD:** QR Code verdadeiro (`qrcode`) sem CPF na URL, página pública `/verificar-ponto/:codigo`, e captura opcional de selfie condicionada a consentimento ativo em `lgpd_consents` (storage privado)
+- [ ] **PONTO-05** **Portal do Colaborador 2.0 (Correções + Escala Visual + Anexo de Atestado):** padronizar rótulos `entry_type` PT-BR, migrar `TimeBankModal` e `TimesheetViewModal` para API autenticada multi-mês, corrigir `get_my_lgpd_dossier` (`positions.title` / `base_salary`), renderizar aba Benefícios e âncora Férias, adicionar **Calendário Visual da Escala/Turno** e **Justificativa com Upload de Atestado Médico** (storage privado)
+- [ ] **PONTO-06** **Workflow Multinível de Aprovação pelo Gestor do Setor (`/aprovacoes`):** fila filtrada por `can_access_contract` para o Gestor aprovar/indeferir ajustes de ponto, atestados (com CID oculto!), folgas de banco de horas e férias da própria equipe (`PENDING_MANAGER → APPROVED_MANAGER → APPROVED_DP`)
+- [ ] **PONTO-07** **Regras Avançadas de Jornada:** HE noturna composta (OJ 97 SDI-1 TST), sobreaviso (1/3), prontidão (2/3), escalas rotativas/revezamento e banco de horas negativo parametrizado por CCT
+
+**Gate V8:** Colaborador bate ponto com GPS anti-spoofing (online ou offline PWA), recebe comprovante com QR Code verificável, vê sua escala e envia atestado; Gestor aprova apenas sua equipe; RH audita batidas no mapa.
+
+---
+
+## 🌐 FASE V9: eSocial Real na VPS Oracle Cloud (A1 ICP-Brasil + mTLS + Totalizadores)
+**Status:** `[Pendente]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §3 FASE V9
+
+- [ ] **ESOC-01** **Cofre Criptografado do Certificado Digital A1 (`.pfx`):** upload real + parse X.509 real (CNPJ/titular/emissor/serial/validade) + criptografia envelope AES-256-GCM (`CERTIFICATE_MASTER_KEY` fora do banco) + alertas de vencimento (60/30/15/7d)
+- [ ] **ESOC-02** **Gerador XML Layouts S-1.2 / S-1.3 + Validador XSD:** eventos de tabela (`S-1000`, `S-1005`, `S-1010`, `S-1020`), não periódicos (`S-2190`, `S-2200`, `S-2205`, `S-2206`, `S-2230`, `S-2240`, `S-2299`, `S-2300`, `S-2399`) e periódicos (`S-1200`, `S-1210`, `S-1298`, `S-1299`)
+- [ ] **ESOC-03** **Assinatura XML-DSig (RSA-SHA256) + Transmissor mTLS Assíncrono (SERPRO/Gov.br):** assinatura nativa no Worker Node.js + HTTPS mTLS com A1 + fila `pg-boss` com retry exponencial + polling automático salvando recibos oficiais
+- [ ] **ESOC-04** **Processamento dos Eventos Totalizadores (`S-5001`, `S-5002`, `S-5003`, `S-5011`, `S-5012`, `S-5013`):** painel de confronto automático **CoupleRH × Governo** destacando divergências antes do fechamento DCTFWeb/FGTS Digital
+- [ ] **ESOC-05** **Homologação Oficial em Produção Restrita (eSocial):** 1 ciclo completo transmitido e aceito com recibos reais antes de habilitar chave de Produção
+
+**Gate V9:** Ciclo completo aceito em Produção Restrita com recibos oficiais e confronto `S-5001/S-5002/S-5003` batendo R\$ 0,00 contra o motor.
+
+---
+
+## 🏆 FASE V10: Excelência Operacional, BI, Admissão Digital, 100+ Golden E2E & Cutover
+**Status:** `[Pendente]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §3 FASE V10
+
+- [ ] **ENT-01** **Motor Real de Notificações & Cron (`pg-boss`):** disparo real de alertas `CONF-04` (e-mail SMTP + WhatsApp opcional + sininho in-app clicável) para férias/dobra, ASO, banco de horas, fechamento do ponto, A1 vencendo e falhas operacionais
+- [ ] **ENT-02** **BI Executivo & Radar de Risco Trabalhista:** `/dashboard` respeitando escopo RBAC com custo real empresa, massa salarial 12m, HE vs banco, turnover, absenteísmo e Radar de Passivo (dobra de férias, interjornada < 11h, intrajornada, HE > 2h/dia)
+- [ ] **ENT-03** **Admissão Digital Self-Service:** link seguro temporário para pré-admissão, envio de documentos no storage privado e assinatura eletrônica de contrato, VT, banco de horas e ciência LGPD
+- [ ] **ENT-04** **Suíte Golden Enterprise (100+ Cenários E2E contra API + PostgreSQL 17) + Benchmark na VPS (1.000 e 5.000 contratos)**
+- [ ] **ENT-05** **Cutover Controlado (Legado → VPS Oracle PostgreSQL 17 Puro):** congelamento pós-fechamento, ETL (`REPO-04`) com reconciliação R\$ 0,00, 1–2 competências paralelas conferidas pelo contador, virada de DNS, monitoramento 30 dias e desligamento seguro do ambiente legado
+
+**Gate V10:** 100% da operação rodando na VPS Oracle Cloud Free Tier (PostgreSQL 17 puro, 100% open-source) com estabilidade, zero divergência contábil, backup 3-2-1 validado e governança enterprise completa.
+
+---
+
+## 📋 Pendências para Contador / Jurídico / Infraestrutura (v2.0)
+
+- [ ] **Segurança Imediata:** Rotacionar a senha da conta administrativa exposta nos scripts `test_db*.js` do repositório legado
+- [ ] **Infraestrutura:** Definir domínio/subdomínios (`app.<dominio>` e `api.<dominio>`), provedor SMTP transacional (SES/Brevo/Resend/Postmark) e confirmar capacidade/região da VPS Oracle Cloud Always Free (ARM64 4 OCPU / 24 GB RAM)
+- [ ] **Contador — Regime de Caixa IRRF:** Confirmar política de pagamento de salário da empresa (5º dia útil vs último dia do mês) e regra de retenção de IRRF no adiantamento
+- [ ] **Contador — CCT & Médias:** Fornecer convenção coletiva vigente da empresa (data-base, pisos, % HE, noturno, base de insalubridade, regra de médias de férias/13º e banco de horas)
+- [ ] **Contador — Plano de Contas & ERP:** Informar o software contábil utilizado pela contabilidade (Domínio, Alterdata, Protheus, Senior ou layout próprio) para priorizar o exportador `CONT-03`
+- [ ] **Jurídico — Ponto Mobile & Selfie:** Validar política de geofencing restritivo vs auditoria, tolerância de precisão GPS e eventual uso de selfie com consentimento LGPD
+- [ ] **Jurídico/Fiscal — Certificado A1:** Disponibilizar certificado A1 (`.pfx`) para homologação em Produção Restrita do eSocial na Fase V9
