@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { AuthService } from './authService.js';
 import { PasswordResetService } from './passwordResetService.js';
 import { authenticate, requireAdminRole } from './authMiddleware.js';
-import { getUserPermissions } from './rbacMiddleware.js';
+import { getUserPermissions, requirePermission } from './rbacMiddleware.js';
 import { dbPool } from '../../shared/db/pool.js';
 import { env } from '../../config/env.js';
 
@@ -471,6 +471,28 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       const userMfaStatus = await mfaService.getUserMfaStatus(request.user!.sub);
       const tenantSettings = await mfaService.getTenantSettings(request.user!.tenant_id);
 
+      let permissions: string[] = [];
+      let scopeMode = 'ALL';
+
+      if (request.user!.role === 'system_admin') {
+        const { rows } = await dbPool.query('SELECT slug FROM public.permissions ORDER BY slug;');
+        permissions = rows.map((r: { slug: string }) => r.slug);
+      } else if (request.user!.tenant_id) {
+        const client = await dbPool.connect();
+        try {
+          permissions = await getUserPermissions(client, request.user!.sub, request.user!.tenant_id, request.user!.role);
+          const { rows: tu } = await client.query(
+            'SELECT scope_mode FROM public.tenant_users WHERE tenant_id = $1 AND user_id = $2;',
+            [request.user!.tenant_id, request.user!.sub]
+          );
+          if (tu.length > 0 && tu[0].scope_mode) {
+            scopeMode = tu[0].scope_mode;
+          }
+        } finally {
+          client.release();
+        }
+      }
+
       return {
         success: true,
         user: {
@@ -487,6 +509,9 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
           mfaEnrolled: userMfaStatus.hasVerifiedMfa,
           mfaRequired: tenantSettings.requireMfaRoles.includes(request.user!.role),
           sessionTimeoutMinutes: tenantSettings.sessionTimeoutMinutes,
+          permissions,
+          isSystemAdmin: request.user!.role === 'system_admin',
+          scope_mode: scopeMode,
         },
       };
     } catch (err: any) {
@@ -499,10 +524,19 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
 
   /**
    * GET /api/v1/auth/sessions
-   * Lista todas as sessões ativas do usuário
+   * Lista todas as sessões ativas do usuário (ou de todo o tenant para admins com ?all=true)
    */
   app.get('/sessions', { preHandler: [authenticate] }, async (request) => {
-    const sessions = await authService.getTokenService().getActiveSessions(request.user!.sub);
+    const query = (request.query || {}) as { all?: string };
+    const isAdmin = request.user?.role === 'system_admin' || request.user?.role === 'tenant_admin';
+    let sessions: any[] = [];
+
+    if (query.all === 'true' && isAdmin && request.user?.tenant_id) {
+      sessions = await authService.getTokenService().getTenantActiveSessions(request.user.tenant_id);
+    } else {
+      sessions = await authService.getTokenService().getActiveSessions(request.user!.sub);
+    }
+
     return {
       success: true,
       currentSessionId: request.user!.session_id,
@@ -512,11 +546,18 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
 
   /**
    * DELETE /api/v1/auth/sessions/:id
-   * Encerra remotamente uma sessão específica do usuário
+   * Encerra remotamente uma sessão específica do usuário ou revogação administrativa
    */
   app.delete('/sessions/:id', { preHandler: [authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const success = await authService.getTokenService().revokeSession(id, request.user!.sub);
+    const isAdmin = request.user?.role === 'system_admin' || request.user?.role === 'tenant_admin';
+    let success = false;
+
+    if (isAdmin) {
+      success = await authService.getTokenService().adminRevokeSession(id);
+    } else {
+      success = await authService.getTokenService().revokeSession(id, request.user!.sub);
+    }
 
     if (!success) {
       return reply.status(404).send({
@@ -778,4 +819,227 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       });
     }
   });
+
+  /**
+   * GET /api/v1/auth/roles/:id/permissions
+   * Retorna os slugs das permissões de um papel
+   */
+  app.get('/roles/:id/permissions', { preHandler: [authenticate] }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    try {
+      const { rows } = await dbPool.query(
+        `SELECT p.slug
+         FROM public.role_permissions rp
+         JOIN public.permissions p ON p.id = rp.permission_id
+         WHERE rp.role_id = $1::uuid;`,
+        [id]
+      );
+
+      return reply.send({
+        success: true,
+        permissions: rows.map((r: { slug: string }) => r.slug),
+      });
+    } catch (err: any) {
+      request.log.error(err, '[AUTH_ROLE_PERMS] Erro ao consultar permissões do papel');
+      return reply.status(500).send({
+        success: false,
+        error: 'Falha ao consultar permissões do papel.',
+      });
+    }
+  });
+
+  /**
+   * POST /api/v1/auth/roles
+   * Cria um novo papel customizado para o tenant com suas permissões (ou clona)
+   */
+  app.post(
+    '/roles',
+    { preHandler: [authenticate, requirePermission('manage_roles')] },
+    async (request, reply) => {
+      const body = request.body as {
+        name: string;
+        description?: string;
+        permissionSlugs?: string[];
+      };
+
+      if (!body.name || body.name.trim().length === 0) {
+        return reply.status(400).send({ success: false, error: 'Nome do papel é obrigatório.' });
+      }
+
+      const tenantId = request.user!.tenant_id;
+      if (!tenantId) {
+        return reply.status(400).send({ success: false, error: 'Tenant obrigatório para criar papel customizado.' });
+      }
+
+      const slug = body.name.toLowerCase().trim().replace(/[^a-z0-9_]/g, '_');
+
+      const client = await dbPool.connect();
+      try {
+        await client.query('BEGIN;');
+
+        const { rows: roleRows } = await client.query(
+          `INSERT INTO public.roles (tenant_id, name, slug, description, is_system)
+           VALUES ($1, $2, $3, $4, FALSE)
+           RETURNING *;`,
+          [tenantId, body.name.trim(), slug, body.description || null]
+        );
+
+        const newRole = roleRows[0];
+
+        if (Array.isArray(body.permissionSlugs) && body.permissionSlugs.length > 0) {
+          await client.query(
+            `INSERT INTO public.role_permissions (role_id, permission_id)
+             SELECT $1::uuid, p.id
+             FROM public.permissions p
+             WHERE p.slug = ANY($2::text[])
+             ON CONFLICT DO NOTHING;`,
+            [newRole.id, body.permissionSlugs]
+          );
+        }
+
+        await client.query('COMMIT;');
+
+        return reply.status(201).send({
+          success: true,
+          message: 'Papel criado com sucesso.',
+          role: newRole,
+        });
+      } catch (err: any) {
+        await client.query('ROLLBACK;');
+        request.log.error(err, '[AUTH_ROLE_CREATE] Erro ao criar papel');
+        return reply.status(500).send({
+          success: false,
+          error: err.message || 'Falha ao criar papel.',
+        });
+      } finally {
+        client.release();
+      }
+    }
+  );
+
+  /**
+   * PUT /api/v1/auth/roles/:id
+   * Atualiza um papel customizado e sua matriz de permissões
+   */
+  app.put(
+    '/roles/:id',
+    { preHandler: [authenticate, requirePermission('manage_roles')] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.body as {
+        name?: string;
+        description?: string;
+        permissionSlugs?: string[];
+      };
+
+      const client = await dbPool.connect();
+      try {
+        await client.query('BEGIN;');
+
+        const { rows: roleRows } = await client.query(
+          'SELECT * FROM public.roles WHERE id = $1::uuid;',
+          [id]
+        );
+
+        if (roleRows.length === 0) {
+          await client.query('ROLLBACK;');
+          return reply.status(404).send({ success: false, error: 'Papel não encontrado.' });
+        }
+
+        if (roleRows[0].is_system) {
+          await client.query('ROLLBACK;');
+          return reply.status(400).send({
+            success: false,
+            code: 'CANNOT_MODIFY_SYSTEM_ROLE',
+            error: 'Papéis canônicos de sistema são imutáveis por compliance.',
+          });
+        }
+
+        if (body.name || body.description !== undefined) {
+          await client.query(
+            `UPDATE public.roles
+             SET name = COALESCE($1, name),
+                 description = COALESCE($2, description),
+                 updated_at = NOW()
+             WHERE id = $3::uuid;`,
+            [body.name?.trim(), body.description, id]
+          );
+        }
+
+        if (Array.isArray(body.permissionSlugs)) {
+          await client.query('DELETE FROM public.role_permissions WHERE role_id = $1::uuid;', [id]);
+
+          if (body.permissionSlugs.length > 0) {
+            await client.query(
+              `INSERT INTO public.role_permissions (role_id, permission_id)
+               SELECT $1::uuid, p.id
+               FROM public.permissions p
+               WHERE p.slug = ANY($2::text[])
+               ON CONFLICT DO NOTHING;`,
+              [id, body.permissionSlugs]
+            );
+          }
+        }
+
+        await client.query('COMMIT;');
+
+        return reply.send({
+          success: true,
+          message: 'Papel atualizado com sucesso.',
+        });
+      } catch (err: any) {
+        await client.query('ROLLBACK;');
+        return reply.status(500).send({
+          success: false,
+          error: err.message || 'Falha ao atualizar papel.',
+        });
+      } finally {
+        client.release();
+      }
+    }
+  );
+
+  /**
+   * DELETE /api/v1/auth/roles/:id
+   * Exclui um papel customizado
+   */
+  app.delete(
+    '/roles/:id',
+    { preHandler: [authenticate, requirePermission('manage_roles')] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      try {
+        const { rows } = await dbPool.query(
+          'SELECT is_system, tenant_id FROM public.roles WHERE id = $1::uuid;',
+          [id]
+        );
+
+        if (rows.length === 0) {
+          return reply.status(404).send({ success: false, error: 'Papel não encontrado.' });
+        }
+
+        if (rows[0].is_system) {
+          return reply.status(400).send({
+            success: false,
+            code: 'CANNOT_DELETE_SYSTEM_ROLE',
+            error: 'Papéis canônicos de sistema não podem ser excluídos.',
+          });
+        }
+
+        await dbPool.query('DELETE FROM public.roles WHERE id = $1::uuid;', [id]);
+
+        return reply.send({
+          success: true,
+          message: 'Papel excluído com sucesso.',
+        });
+      } catch (err: any) {
+        return reply.status(500).send({
+          success: false,
+          error: err.message || 'Falha ao excluir papel.',
+        });
+      }
+    }
+  );
 };

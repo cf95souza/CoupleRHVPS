@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { X, Shield, User, Check, Power, AlertCircle, Briefcase } from "lucide-react";
+import { X, Shield, User, Check, Power, AlertCircle, Briefcase, Globe, Filter, Users as UsersIcon, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { 
   UserManagementService, 
@@ -37,6 +37,7 @@ export default function EditUserModal({
   const [selectedRoleId, setSelectedRoleId] = useState<string>("");
   const [selectedRoleEnum, setSelectedRoleEnum] = useState<UserRole>("employee");
   const [selectedWorkerId, setSelectedWorkerId] = useState<string>("");
+  const [scopeMode, setScopeMode] = useState<'ALL' | 'RESTRICTED' | 'OWN_TEAM' | 'SELF_ONLY'>('ALL');
   const [isActive, setIsActive] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +47,7 @@ export default function EditUserModal({
       setSelectedRoleId(user.role_id || "");
       setSelectedRoleEnum(user.role);
       setSelectedWorkerId(user.worker_id || "");
+      setScopeMode(user.scope_mode || 'ALL');
       setIsActive(user.is_active);
       setError(null);
     }
@@ -77,6 +79,7 @@ export default function EditUserModal({
         role: selectedRoleEnum,
         role_id: selectedRoleId || null,
         worker_id: selectedWorkerId || null,
+        scope_mode: scopeMode,
         is_active: isActive,
       });
 
@@ -185,6 +188,83 @@ export default function EditUserModal({
             <p className="text-[11px] text-slate-500 mt-1">
               Necessário caso este usuário vá acessar o <strong>Portal do Colaborador</strong>, bater ponto mobile (REP-P) ou assinar recibos e documentos digitais.
             </p>
+          </div>
+
+          {/* Modo de Escopo Organizacional (RBAC-02 & RBAC-07) */}
+          <div className="pt-2 border-t border-slate-100">
+            <label className="block text-sm font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+              <Globe size={16} className="text-primary-500" />
+              Escopo Organizacional de Visibilidade
+            </label>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <label 
+                className={`flex flex-col p-2.5 rounded-lg border cursor-pointer transition-all ${
+                  scopeMode === 'ALL' 
+                    ? 'bg-blue-50/70 border-blue-400 text-blue-900 font-semibold' 
+                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100/60'
+                }`}
+                onClick={() => setScopeMode('ALL')}
+              >
+                <div className="flex items-center gap-1.5 text-xs font-bold">
+                  <Globe size={13} className="text-blue-600" />
+                  <span>Global (ALL)</span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-normal mt-0.5">
+                  Acesso total a todas as empresas do tenant
+                </span>
+              </label>
+
+              <label 
+                className={`flex flex-col p-2.5 rounded-lg border cursor-pointer transition-all ${
+                  scopeMode === 'RESTRICTED' 
+                    ? 'bg-amber-50/70 border-amber-400 text-amber-900 font-semibold' 
+                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100/60'
+                }`}
+                onClick={() => setScopeMode('RESTRICTED')}
+              >
+                <div className="flex items-center gap-1.5 text-xs font-bold">
+                  <Filter size={13} className="text-amber-600" />
+                  <span>Restrito (RESTRICTED)</span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-normal mt-0.5">
+                  Apenas empresas/estabelecimentos delegados
+                </span>
+              </label>
+
+              <label 
+                className={`flex flex-col p-2.5 rounded-lg border cursor-pointer transition-all ${
+                  scopeMode === 'OWN_TEAM' 
+                    ? 'bg-purple-50/70 border-purple-400 text-purple-900 font-semibold' 
+                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100/60'
+                }`}
+                onClick={() => setScopeMode('OWN_TEAM')}
+              >
+                <div className="flex items-center gap-1.5 text-xs font-bold">
+                  <UsersIcon size={13} className="text-purple-600" />
+                  <span>Equipe (OWN_TEAM)</span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-normal mt-0.5">
+                  Gestor de equipe (subordinados diretos)
+                </span>
+              </label>
+
+              <label 
+                className={`flex flex-col p-2.5 rounded-lg border cursor-pointer transition-all ${
+                  scopeMode === 'SELF_ONLY' 
+                    ? 'bg-emerald-50/70 border-emerald-400 text-emerald-900 font-semibold' 
+                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100/60'
+                }`}
+                onClick={() => setScopeMode('SELF_ONLY')}
+              >
+                <div className="flex items-center gap-1.5 text-xs font-bold">
+                  <UserCheck size={13} className="text-emerald-600" />
+                  <span>Individual (SELF_ONLY)</span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-normal mt-0.5">
+                  Restrito aos próprios dados do colaborador
+                </span>
+              </label>
+            </div>
           </div>
 
           {/* Status Ativo/Inativo */}

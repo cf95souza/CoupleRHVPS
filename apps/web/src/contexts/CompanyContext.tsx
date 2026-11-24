@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect } from "react";
 import type { ReactNode } from "react";
-import { supabase } from "../lib/apiClient";
+import { supabase, apiClient } from "../lib/apiClient";
 import { useAuth } from "./AuthContext";
 
 interface Company {
@@ -34,26 +34,33 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     if (!user) return;
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from("companies")
-        .select("id, corporate_name, trade_name, cnpj")
-        .order("corporate_name", { ascending: true });
+      let data: Company[] = [];
 
-      if (error) throw error;
-
-      if (data) {
-        setCompanies(data);
-        
-        // Se houver empresas cadastradas mas nenhuma selecionada (ou a selecionada não existe mais),
-        // seleciona a primeira por padrão
-        if (data.length > 0) {
-          const exists = data.find(c => c.id === selectedCompanyId);
-          if (!selectedCompanyId || !exists) {
-            setSelectedCompanyId(data[0].id);
-          }
-        } else {
-          setSelectedCompanyId(null);
+      try {
+        const res = await apiClient.get<{ success: boolean; data: Company[] }>('/api/v1/org/companies');
+        if (res && Array.isArray(res.data)) {
+          data = res.data;
         }
+      } catch {
+        const { data: fallbackData, error } = await supabase
+          .from("companies")
+          .select("id, corporate_name, trade_name, cnpj")
+          .order("corporate_name", { ascending: true });
+        if (error) throw error;
+        data = fallbackData || [];
+      }
+
+      setCompanies(data);
+      
+      // Se houver empresas cadastradas mas nenhuma selecionada (ou a selecionada não existe mais),
+      // seleciona a primeira por padrão
+      if (data.length > 0) {
+        const exists = data.find(c => c.id === selectedCompanyId);
+        if (!selectedCompanyId || !exists) {
+          setSelectedCompanyId(data[0].id);
+        }
+      } else {
+        setSelectedCompanyId(null);
       }
     } catch (error) {
       console.error("Erro ao carregar empresas para o contexto:", error);

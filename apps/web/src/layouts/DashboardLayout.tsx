@@ -9,88 +9,105 @@ import {
 } from 'lucide-react';
 import { useCompany } from '../contexts/CompanyContext';
 
-const NAV_SECTIONS = [
+const NAV_SECTIONS: Array<{
+  label: string;
+  items: Array<{
+    to: string;
+    icon: any;
+    label: string;
+    permission?: string | string[];
+  }>;
+}> = [
   {
     label: 'Principal',
     items: [
-      { to: '/dashboard', icon: LayoutDashboard, label: 'Painel Geral' },
-      { to: '/empresas', icon: Building2, label: 'Empresas' },
+      { to: '/dashboard', icon: LayoutDashboard, label: 'Painel Geral', permission: 'view_dashboard' },
+      { to: '/empresas', icon: Building2, label: 'Empresas', permission: 'manage_companies' },
     ]
   },
   {
     label: 'Organização',
     items: [
-      { to: '/departamentos', icon: Building2, label: 'Departamentos' },
-      { to: '/setores', icon: GitBranch, label: 'Setores' },
-      { to: '/centros-de-custo', icon: Landmark, label: 'Centros de Custo' },
-      { to: '/lotacoes', icon: MapPin, label: 'Lotações / Locais' },
-      { to: '/cargos', icon: Briefcase, label: 'Cargos e CBO' },
-      { to: '/tipos-de-contrato', icon: FileText, label: 'Tipos de Contrato' },
-      { to: '/funcionarios', icon: Users, label: 'Colaboradores' },
-      { to: '/funcionarios/movimentacoes', icon: TrendingUp, label: 'Movimentações' },
-      { to: '/desligamentos', icon: UserMinus, label: 'Desligamentos' },
+      { to: '/departamentos', icon: Building2, label: 'Departamentos', permission: 'manage_org_structure' },
+      { to: '/setores', icon: GitBranch, label: 'Setores', permission: 'manage_org_structure' },
+      { to: '/centros-de-custo', icon: Landmark, label: 'Centros de Custo', permission: 'manage_org_structure' },
+      { to: '/lotacoes', icon: MapPin, label: 'Lotações / Locais', permission: 'manage_org_structure' },
+      { to: '/cargos', icon: Briefcase, label: 'Cargos e CBO', permission: 'manage_org_structure' },
+      { to: '/tipos-de-contrato', icon: FileText, label: 'Tipos de Contrato', permission: 'manage_org_structure' },
+      { to: '/funcionarios', icon: Users, label: 'Colaboradores', permission: 'view_employees' },
+      { to: '/funcionarios/movimentacoes', icon: TrendingUp, label: 'Movimentações', permission: 'view_employees' },
+      { to: '/desligamentos', icon: UserMinus, label: 'Desligamentos', permission: 'manage_terminations' },
     ]
   },
   {
     label: 'Ponto Eletrônico',
     items: [
-      { to: '/ponto/gestao', icon: Watch, label: 'Gestão de Ponto' },
-      { to: '/ponto/espelho', icon: Clock, label: 'Espelho e Fechamento' },
-      { to: '/jornadas', icon: CalendarDays, label: 'Jornadas de Trabalho' },
-      { to: '/feriados', icon: CalendarDays, label: 'Feriados' },
+      { to: '/ponto/gestao', icon: Watch, label: 'Gestão de Ponto', permission: 'view_time_tracking' },
+      { to: '/ponto/espelho', icon: Clock, label: 'Espelho e Fechamento', permission: 'view_time_tracking' },
+      { to: '/jornadas', icon: CalendarDays, label: 'Jornadas de Trabalho', permission: 'manage_time_tracking' },
+      { to: '/feriados', icon: CalendarDays, label: 'Feriados', permission: 'manage_time_tracking' },
     ]
   },
   {
     label: 'Gestão e Rotinas',
     items: [
-      { to: '/ferias', icon: CalendarDays, label: 'Férias' },
-      { to: '/afastamentos', icon: Stethoscope, label: 'Afastamentos' },
-      { to: '/beneficios', icon: Briefcase, label: 'Benefícios' },
+      { to: '/ferias', icon: CalendarDays, label: 'Férias', permission: 'manage_vacations' },
+      { to: '/afastamentos', icon: Stethoscope, label: 'Afastamentos', permission: 'manage_leaves' },
+      { to: '/beneficios', icon: Briefcase, label: 'Benefícios', permission: 'manage_benefits' },
     ]
   },
   {
     label: 'Folha de Pagamento',
     items: [
-      { to: '/folha/processamento', icon: Calculator, label: 'Motor de Cálculo' },
-      { to: '/folha/lancamentos', icon: Activity, label: 'Lançamentos Variáveis' },
-      { to: '/folha/holerites', icon: FileText, label: 'Holerites' },
-      { to: '/folha/rubricas', icon: Settings, label: 'Rubricas e Regras' },
-      { to: '/folha/relatorios', icon: TrendingUp, label: 'Relatórios Analíticos' },
+      { to: '/folha/processamento', icon: Calculator, label: 'Motor de Cálculo', permission: 'calculate_payroll' },
+      { to: '/folha/lancamentos', icon: Activity, label: 'Lançamentos Variáveis', permission: 'manage_payroll_events' },
+      { to: '/folha/holerites', icon: FileText, label: 'Holerites', permission: 'view_payslips' },
+      { to: '/folha/rubricas', icon: Settings, label: 'Rubricas e Regras', permission: 'manage_rubrics' },
+      { to: '/folha/relatorios', icon: TrendingUp, label: 'Relatórios Analíticos', permission: 'view_payroll_accounting' },
     ]
   },
   {
     label: 'Conformidade',
     items: [
-      { to: '/esocial', icon: Activity, label: 'eSocial' },
-      { to: '/sst', icon: ShieldAlert, label: 'SST' },
+      { to: '/esocial', icon: Activity, label: 'eSocial', permission: 'manage_esocial' },
+      { to: '/sst', icon: ShieldAlert, label: 'SST', permission: 'view_sst' },
     ]
   },
   {
     label: 'Documentos',
     items: [
-      { to: '/documentos/recepcao', icon: Inbox, label: 'Recepção / Auditoria' },
-      { to: '/documentos/templates', icon: FileText, label: 'Modelos' },
-      { to: '/documentos/cofre', icon: ShieldCheck, label: 'Cofre Digital' },
+      { to: '/documentos/recepcao', icon: Inbox, label: 'Recepção / Auditoria', permission: 'manage_documents' },
+      { to: '/documentos/templates', icon: FileText, label: 'Modelos', permission: 'manage_documents' },
+      { to: '/documentos/cofre', icon: ShieldCheck, label: 'Cofre Digital', permission: 'manage_documents' },
     ]
   },
   {
     label: 'Sistema',
     items: [
-      { to: '/auditoria', icon: ShieldCheck, label: 'Auditoria' },
-      { to: '/configuracoes', icon: Settings, label: 'Configurações Globais' },
-      { to: '/configuracoes/tabelas-legais', icon: Calculator, label: 'Parâmetros Legais' },
+      { to: '/auditoria', icon: ShieldCheck, label: 'Auditoria', permission: 'view_audit_logs' },
+      { to: '/configuracoes', icon: Settings, label: 'Configurações Globais', permission: ['manage_settings', 'manage_roles'] },
+      { to: '/configuracoes/tabelas-legais', icon: Calculator, label: 'Parâmetros Legais', permission: 'manage_legal_parameters' },
       { to: '/ajuda', icon: HelpCircle, label: 'Ajuda / Tutorial' },
     ]
   },
 ];
 
 export default function DashboardLayout() {
-  const { user, signOut } = useAuth();
+  const { user, hasPermission, signOut } = useAuth();
   const { companies, selectedCompanyId, selectedCompany, setSelectedCompanyId } = useCompany();
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
+
+  // Filtragem de seções e itens conforme as permissões ativas do usuário
+  const visibleSections = NAV_SECTIONS.map((section) => {
+    const visibleItems = section.items.filter((item) => {
+      if (!item.permission) return true;
+      return hasPermission(item.permission);
+    });
+    return { ...section, items: visibleItems };
+  }).filter((section) => section.items.length > 0);
   
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => {
     try {
@@ -179,7 +196,7 @@ export default function DashboardLayout() {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-2 space-y-1">
-        {NAV_SECTIONS.map((section) => {
+        {visibleSections.map((section) => {
           const isCollapsed = collapsedSections.has(section.label);
           return (
             <div key={section.label}>

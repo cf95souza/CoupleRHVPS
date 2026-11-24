@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import DashboardLayout from '../layouts/DashboardLayout';
 import ProtectedRoute from '../components/ProtectedRoute';
+import RequirePermission from '../components/auth/RequirePermission';
+import AccessDenied403 from '../pages/AccessDenied403';
 import { AuthProvider } from '../contexts/AuthContext';
 import { CompanyProvider } from '../contexts/CompanyContext';
 import Login from '../pages/Login';
@@ -69,6 +71,7 @@ export function AppRoutes() {
           <Route path="/portal/dashboard" element={<EmployeePortal />} />
           <Route path="/verificar" element={<PublicDocumentVerification />} />
           <Route path="/verificar/:codigo" element={<PublicDocumentVerification />} />
+          <Route path="/403" element={<AccessDenied403 />} />
           
           {/* Rotas Administrativas protegidas */}
           <Route element={<ProtectedRoute />}>
@@ -79,84 +82,135 @@ export function AppRoutes() {
             }>
               <Route path="/dashboard" element={<Dashboard />} />
               
-              <Route path="/empresas" element={<CompaniesList />} />
-              <Route path="/empresas/nova" element={<CompanyForm />} />
-              <Route path="/empresas/:id" element={<CompanyForm />} />
-              <Route path="/cargos" element={<PositionsList />} />
+              {/* Empresas */}
+              <Route element={<RequirePermission permission="manage_companies" />}>
+                <Route path="/empresas" element={<CompaniesList />} />
+                <Route path="/empresas/nova" element={<CompanyForm />} />
+                <Route path="/empresas/:id" element={<CompanyForm />} />
+              </Route>
               
-              <Route path="/funcionarios/movimentacoes" element={<Movements />} />
-              
-              <Route path="/desligamentos" element={<TerminationsList />} />
-              <Route path="/desligamentos/novo" element={<OffboardingWizard />} />
-              
-              <Route path="/ponto/gestao" element={<TimeManagement />} />
-              <Route path="/ponto/gestao/:tab" element={<TimeManagement />} />
-              <Route path="/ponto/espelho" element={<Timesheet />} />
-              
-              <Route path="/ferias" element={<VacationsList />} />
-              <Route path="/ferias/novo" element={<VacationWizard />} />
-              <Route path="/afastamentos" element={<LeavesList />} />
-              <Route path="/afastamentos/novo" element={<LeaveWizard />} />
-              <Route path="/afastamentos/:id" element={<LeaveWizard />} />
-              <Route path="/beneficios" element={<BenefitsList />} />
-              <Route path="/beneficios/novo" element={<BenefitForm />} />
-              
-              <Route path="/folha/processamento" element={<PayrollCalculations />} />
-              <Route path="/folha/lancamentos" element={<PayrollEvents />} />
-              <Route path="/folha/holerites" element={<Payslips />} />
-              <Route path="/folha/rubricas" element={<PayrollRubrics />} />
-              <Route path="/folha/relatorios" element={<PayrollReports />} />
-              
-              <Route path="/esocial" element={<ESocialDashboard />} />
-              <Route path="/sst" element={<SstDashboard />} />
-              
-              <Route path="/documentos/templates" element={<Templates />} />
-              <Route path="/documentos/cofre" element={<SignaturesVault />} />
-              <Route path="/documentos/recepcao" element={<PersonalDocsInbox />} />
-              
-              <Route path="/departamentos" element={<DepartmentsList />} />
-              <Route path="/departamentos/novo" element={<DepartmentForm />} />
-              <Route path="/departamentos/:id" element={<DepartmentForm />} />
+              {/* Estrutura Organizacional */}
+              <Route element={<RequirePermission permission="manage_org_structure" />}>
+                <Route path="/departamentos" element={<DepartmentsList />} />
+                <Route path="/departamentos/novo" element={<DepartmentForm />} />
+                <Route path="/departamentos/:id" element={<DepartmentForm />} />
 
-              <Route path="/setores" element={<SectorsList />} />
-              <Route path="/setores/novo" element={<SectorForm />} />
-              <Route path="/setores/:id" element={<SectorForm />} />
+                <Route path="/setores" element={<SectorsList />} />
+                <Route path="/setores/novo" element={<SectorForm />} />
+                <Route path="/setores/:id" element={<SectorForm />} />
 
-              <Route path="/cargos" element={<PositionsList />} />
-              <Route path="/cargos/novo" element={<PositionForm />} />
-              <Route path="/cargos/:id" element={<PositionForm />} />
+                <Route path="/cargos" element={<PositionsList />} />
+                <Route path="/cargos/novo" element={<PositionForm />} />
+                <Route path="/cargos/:id" element={<PositionForm />} />
 
-              <Route path="/funcionarios" element={<EmployeesList />} />
-              <Route path="/funcionarios/novo" element={<EmployeeProfile />} />
-              <Route path="/funcionarios/:id" element={<EmployeeProfile />} />
+                <Route path="/tipos-de-contrato" element={<ContractTypesList />} />
+                <Route path="/tipos-de-contrato/novo" element={<ContractTypeForm />} />
+                <Route path="/tipos-de-contrato/:id" element={<ContractTypeForm />} />
 
-              <Route path="/tipos-de-contrato" element={<ContractTypesList />} />
-              <Route path="/tipos-de-contrato/novo" element={<ContractTypeForm />} />
-              <Route path="/tipos-de-contrato/:id" element={<ContractTypeForm />} />
+                <Route path="/centros-de-custo" element={<CostCentersList />} />
+                <Route path="/centros-de-custo/novo" element={<CostCenterForm />} />
+                <Route path="/centros-de-custo/:id" element={<CostCenterForm />} />
 
-              <Route path="/centros-de-custo" element={<CostCentersList />} />
-              <Route path="/centros-de-custo/novo" element={<CostCenterForm />} />
-              <Route path="/centros-de-custo/:id" element={<CostCenterForm />} />
+                <Route path="/lotacoes" element={<WorkplacesList />} />
+                <Route path="/lotacoes/nova" element={<WorkplaceForm />} />
+                <Route path="/lotacoes/:id" element={<WorkplaceForm />} />
+              </Route>
 
-              <Route path="/lotacoes" element={<WorkplacesList />} />
-              <Route path="/lotacoes/nova" element={<WorkplaceForm />} />
-              <Route path="/lotacoes/:id" element={<WorkplaceForm />} />
-
-              <Route path="/jornadas" element={<WorkSchedulesList />} />
-              <Route path="/jornadas/nova" element={<WorkScheduleForm />} />
-              <Route path="/jornadas/:id" element={<WorkScheduleForm />} />
-
-              <Route path="/feriados" element={<HolidaysList />} />
-              <Route path="/feriados/novo" element={<HolidayForm />} />
-              <Route path="/feriados/:id" element={<HolidayForm />} />
+              {/* Colaboradores e Movimentações */}
+              <Route element={<RequirePermission permission="view_employees" />}>
+                <Route path="/funcionarios" element={<EmployeesList />} />
+                <Route path="/funcionarios/novo" element={<EmployeeProfile />} />
+                <Route path="/funcionarios/:id" element={<EmployeeProfile />} />
+                <Route path="/funcionarios/movimentacoes" element={<Movements />} />
+              </Route>
               
-              {/* Rotas genéricas de placeholder para visualização */}
+              {/* Desligamentos */}
+              <Route element={<RequirePermission permission="manage_terminations" />}>
+                <Route path="/desligamentos" element={<TerminationsList />} />
+                <Route path="/desligamentos/novo" element={<OffboardingWizard />} />
+              </Route>
+              
+              {/* Ponto Eletrônico */}
+              <Route element={<RequirePermission permission="view_time_tracking" />}>
+                <Route path="/ponto/gestao" element={<TimeManagement />} />
+                <Route path="/ponto/gestao/:tab" element={<TimeManagement />} />
+                <Route path="/ponto/espelho" element={<Timesheet />} />
+              </Route>
+              <Route element={<RequirePermission permission="manage_time_tracking" />}>
+                <Route path="/jornadas" element={<WorkSchedulesList />} />
+                <Route path="/jornadas/nova" element={<WorkScheduleForm />} />
+                <Route path="/jornadas/:id" element={<WorkScheduleForm />} />
+                <Route path="/feriados" element={<HolidaysList />} />
+                <Route path="/feriados/novo" element={<HolidayForm />} />
+                <Route path="/feriados/:id" element={<HolidayForm />} />
+              </Route>
+              
+              {/* Férias */}
+              <Route element={<RequirePermission permission="manage_vacations" />}>
+                <Route path="/ferias" element={<VacationsList />} />
+                <Route path="/ferias/novo" element={<VacationWizard />} />
+              </Route>
+
+              {/* Afastamentos */}
+              <Route element={<RequirePermission permission="manage_leaves" />}>
+                <Route path="/afastamentos" element={<LeavesList />} />
+                <Route path="/afastamentos/novo" element={<LeaveWizard />} />
+                <Route path="/afastamentos/:id" element={<LeaveWizard />} />
+              </Route>
+
+              {/* Benefícios */}
+              <Route element={<RequirePermission permission="manage_benefits" />}>
+                <Route path="/beneficios" element={<BenefitsList />} />
+                <Route path="/beneficios/novo" element={<BenefitForm />} />
+              </Route>
+              
+              {/* Folha de Pagamento */}
+              <Route element={<RequirePermission permission="calculate_payroll" />}>
+                <Route path="/folha/processamento" element={<PayrollCalculations />} />
+              </Route>
+              <Route element={<RequirePermission permission="manage_payroll_events" />}>
+                <Route path="/folha/lancamentos" element={<PayrollEvents />} />
+              </Route>
+              <Route element={<RequirePermission permission="view_payslips" />}>
+                <Route path="/folha/holerites" element={<Payslips />} />
+              </Route>
+              <Route element={<RequirePermission permission="manage_rubrics" />}>
+                <Route path="/folha/rubricas" element={<PayrollRubrics />} />
+              </Route>
+              <Route element={<RequirePermission permission="view_payroll_accounting" />}>
+                <Route path="/folha/relatorios" element={<PayrollReports />} />
+              </Route>
+              
+              {/* eSocial & SST */}
+              <Route element={<RequirePermission permission="manage_esocial" />}>
+                <Route path="/esocial" element={<ESocialDashboard />} />
+              </Route>
+              <Route element={<RequirePermission permission="view_sst" />}>
+                <Route path="/sst" element={<SstDashboard />} />
+              </Route>
+              
+              {/* Documentos */}
+              <Route element={<RequirePermission permission="manage_documents" />}>
+                <Route path="/documentos/templates" element={<Templates />} />
+                <Route path="/documentos/cofre" element={<SignaturesVault />} />
+                <Route path="/documentos/recepcao" element={<PersonalDocsInbox />} />
+              </Route>
+              
+              {/* Auditoria & Configurações */}
+              <Route element={<RequirePermission permission="view_audit_logs" />}>
+                <Route path="/auditoria" element={<LogViewer />} />
+              </Route>
+              <Route element={<RequirePermission permission={['manage_settings', 'manage_roles']} />}>
+                <Route path="/configuracoes" element={<SettingsDashboard />} />
+              </Route>
+              <Route element={<RequirePermission permission="manage_legal_parameters" />}>
+                <Route path="/configuracoes/tabelas-legais" element={<LegalTablesList />} />
+                <Route path="/configuracoes/tabelas-legais/nova" element={<LegalTablesForm />} />
+                <Route path="/configuracoes/tabelas-legais/:id" element={<LegalTablesForm />} />
+              </Route>
+
+              {/* Ajuda */}
               <Route path="/ajuda" element={<Help />} />
-              <Route path="/auditoria" element={<LogViewer />} />
-              <Route path="/configuracoes" element={<SettingsDashboard />} />
-              <Route path="/configuracoes/tabelas-legais" element={<LegalTablesList />} />
-              <Route path="/configuracoes/tabelas-legais/nova" element={<LegalTablesForm />} />
-              <Route path="/configuracoes/tabelas-legais/:id" element={<LegalTablesForm />} />
             </Route>
           </Route>
           

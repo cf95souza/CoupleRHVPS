@@ -13,6 +13,7 @@ export interface TenantUserDetails {
   worker_cpf: string | null;
   full_name: string;
   email: string;
+  scope_mode?: 'ALL' | 'RESTRICTED' | 'OWN_TEAM' | 'SELF_ONLY';
   is_active: boolean;
   created_at: string;
 }
@@ -31,6 +32,7 @@ export interface UpdateUserAccessPayload {
   role: UserRole;
   role_id: string | null;
   worker_id: string | null;
+  scope_mode?: 'ALL' | 'RESTRICTED' | 'OWN_TEAM' | 'SELF_ONLY';
   is_active: boolean;
 }
 export const UpdateUserAccessPayload = {} as const;
@@ -81,6 +83,7 @@ export const UserManagementService = {
           worker_cpf: u.worker_cpf,
           full_name: u.full_name || 'Usuário do Sistema',
           email: u.email || 'E-mail não informado',
+          scope_mode: u.scope_mode || 'ALL',
           is_active: u.is_active !== false,
           created_at: u.created_at,
         }));
@@ -96,6 +99,7 @@ export const UserManagementService = {
           role,
           role_id,
           worker_id,
+          scope_mode,
           created_at,
           roles ( name ),
           workers (
@@ -108,7 +112,7 @@ export const UserManagementService = {
         // Fallback básico para evitar travamento da tela em casos extremos
         const { data: basicUsers, error: basicError } = await supabase
           .from('tenant_users')
-          .select('id, user_id, tenant_id, role, role_id, created_at');
+          .select('id, user_id, tenant_id, role, role_id, scope_mode, created_at');
         if (basicError) throw basicError;
 
         return (basicUsers || []).map((u: any) => ({
@@ -123,6 +127,7 @@ export const UserManagementService = {
           worker_cpf: null,
           full_name: 'Usuário Registrado',
           email: 'Consulte perfil',
+          scope_mode: u.scope_mode || 'ALL',
           is_active: true,
           created_at: u.created_at,
         }));
@@ -159,6 +164,7 @@ export const UserManagementService = {
           worker_cpf: workerPerson?.cpf || null,
           full_name: profile?.full_name || workerPerson?.full_name || 'Usuário Existente',
           email: profile?.email || 'E-mail Oculto',
+          scope_mode: u.scope_mode || 'ALL',
           is_active: (u as any).is_active !== false,
           created_at: u.created_at,
         };
@@ -220,6 +226,7 @@ export const UserManagementService = {
           role: payload.role,
           role_id: payload.role_id,
           worker_id: payload.worker_id,
+          scope_mode: payload.scope_mode || 'ALL',
           is_active: payload.is_active,
         })
         .eq('id', payload.tenant_user_id);

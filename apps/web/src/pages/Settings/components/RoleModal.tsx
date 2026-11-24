@@ -1,13 +1,15 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { X, Shield, Check } from "lucide-react";
-import { supabase } from "../../../lib/apiClient";
+import { X, Shield, Check, Copy, CheckSquare, Square } from "lucide-react";
+import { apiClient } from "../../../lib/apiClient";
+import { toast } from "sonner";
 
 interface Role {
   id: string;
   name: string;
   description: string;
-  is_system_role: boolean;
+  is_system_role?: boolean;
+  is_system?: boolean;
 }
 
 interface Permission {
@@ -21,12 +23,21 @@ interface RoleModalProps {
   isOpen: boolean;
   onClose: () => void;
   roleToEdit: Role | null;
+  isClone?: boolean;
   allPermissions: Permission[];
   currentRolePermissions: string[];
   onSuccess: () => void;
 }
 
-export default function RoleModal({ isOpen, onClose, roleToEdit, allPermissions, currentRolePermissions, onSuccess }: RoleModalProps) {
+export default function RoleModal({ 
+  isOpen, 
+  onClose, 
+  roleToEdit, 
+  isClone = false,
+  allPermissions, 
+  currentRolePermissions, 
+  onSuccess 
+}: RoleModalProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [selectedPerms, setSelectedPerms] = useState<string[]>([]);
@@ -36,9 +47,9 @@ export default function RoleModal({ isOpen, onClose, roleToEdit, allPermissions,
   useEffect(() => {
     if (isOpen) {
       if (roleToEdit) {
-        setName(roleToEdit.name);
-        setDescription(roleToEdit.description);
-        setSelectedPerms(currentRolePermissions);
+        setName(isClone ? `[Cópia] ${roleToEdit.name}` : roleToEdit.name);
+        setDescription(roleToEdit.description || "");
+        setSelectedPerms([...currentRolePermissions]);
       } else {
         setName("");
         setDescription("");
@@ -46,7 +57,7 @@ export default function RoleModal({ isOpen, onClose, roleToEdit, allPermissions,
       }
       setError(null);
     }
-  }, [isOpen, roleToEdit, currentRolePermissions]);
+  }, [isOpen, roleToEdit, isClone, currentRolePermissions]);
 
   if (!isOpen) return null;
 
@@ -55,6 +66,20 @@ export default function RoleModal({ isOpen, onClose, roleToEdit, allPermissions,
       setSelectedPerms(selectedPerms.filter(p => p !== slug));
     } else {
       setSelectedPerms([...selectedPerms, slug]);
+    }
+  };
+
+  const toggleModulePermissions = (module: string) => {
+    const modulePerms = allPermissions.filter(p => p.module === module).map(p => p.slug);
+    const allSelected = modulePerms.every(slug => selectedPerms.includes(slug));
+
+    if (allSelected) {
+      // Remove todas do módulo
+      setSelectedPerms(selectedPerms.filter(slug => !modulePerms.includes(slug)));
+    } else {
+      // Adiciona todas do módulo que ainda não estão selecionadas
+      const newSelected = new Set([...selectedPerms, ...modulePerms]);
+      setSelectedPerms(Array.from(newSelected));
     }
   };
 
@@ -69,48 +94,29 @@ export default function RoleModal({ isOpen, onClose, roleToEdit, allPermissions,
       setLoading(true);
       setError(null);
 
-      // Obter tenant atual
-      const { data: tenantUsers } = await supabase.from('tenant_users').select('tenant_id').limit(1);
-      const tenantId = tenantUsers?.[0]?.tenant_id;
-      if (!tenantId) throw new Error("Tenant não encontrado");
+      const payload = {
+        name: name.trim(),
+        description: description.trim(),
+        permissionSlugs: selectedPerms,
+      };
 
-      let roleId = roleToEdit?.id;
-
-      if (roleId) {
-        // Atualizar
-        const { error: updateError } = await supabase
-          .from('roles')
-          .update({ name, description })
-          .eq('id', roleId);
-        if (updateError) throw updateError;
-        
-        // Limpar permissões antigas
-        await supabase.from('role_permissions').delete().eq('role_id', roleId);
+      if (roleToEdit && !isClone) {
+        // Atualizar papel existente
+        await apiClient.put(`/api/v1/auth/roles/${roleToEdit.id}`, payload);
+        toast.success(`Perfil '${name}' atualizado com sucesso!`);
       } else {
-        // Inserir
-        const { data: newRole, error: insertError } = await supabase
-          .from('roles')
-          .insert({ tenant_id: tenantId, name, description, is_system_role: false })
-          .select()
-          .single();
-        if (insertError) throw insertError;
-        roleId = newRole.id;
-      }
-
-      // Inserir novas permissões
-      if (selectedPerms.length > 0) {
-        const permsToInsert = selectedPerms.map(slug => ({
-          role_id: roleId,
-          permission_slug: slug
-        }));
-        const { error: permError } = await supabase.from('role_permissions').insert(permsToInsert);
-        if (permError) throw permError;
+        // Criar ou Clonar novo papel
+        await apiClient.post('/api/v1/auth/roles', payload);
+        toast.success(`Perfil '${name}' criado com sucesso!`);
       }
 
       onSuccess();
+      onClose();
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Ocorreu um erro ao salvar o perfil.");
+      console.error("Erro ao salvar perfil:", err);
+      const msg = err.message || err.error || "Ocorreu um erro ao salvar o perfil.";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -121,17 +127,23 @@ export default function RoleModal({ isOpen, onClose, roleToEdit, allPermissions,
 
   return createPortal(
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary-100 text-primary-600 flex items-center justify-center">
-              <Shield size={20} />
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+              isClone ? 'bg-amber-100 text-amber-600' : 'bg-primary-100 text-primary-600'
+            }`}>
+              {isClone ? <Copy size={20} /> : <Shield size={20} />}
             </div>
             <div>
               <h2 className="text-lg font-bold text-slate-800 font-display">
-                {roleToEdit ? "Editar Perfil" : "Novo Perfil de Acesso"}
+                {isClone ? "Clonar Perfil de Acesso" : roleToEdit ? "Editar Perfil" : "Novo Perfil de Acesso"}
               </h2>
-              <p className="text-xs text-slate-500">Defina o nome e as permissões</p>
+              <p className="text-xs text-slate-500">
+                {isClone 
+                  ? `Criando cópia personalizada a partir de '${roleToEdit?.name}'`
+                  : "Defina o nome, a descrição e a matriz de permissões granulares"}
+              </p>
             </div>
           </div>
           <button 
@@ -157,8 +169,9 @@ export default function RoleModal({ isOpen, onClose, roleToEdit, allPermissions,
                   type="text" 
                   value={name}
                   onChange={e => setName(e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all text-sm"
-                  placeholder="Ex: Gerente de Loja"
+                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all text-sm font-medium"
+                  placeholder="Ex: Gestor Operacional de Unidade"
+                  required
                 />
               </div>
 
@@ -167,62 +180,120 @@ export default function RoleModal({ isOpen, onClose, roleToEdit, allPermissions,
                 <textarea 
                   value={description}
                   onChange={e => setDescription(e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all text-sm resize-none h-20"
-                  placeholder="Descreva a função deste perfil..."
+                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all text-sm resize-none h-18"
+                  placeholder="Descreva as atribuições e finalidade deste perfil..."
                 />
               </div>
             </div>
 
             <div className="pt-4 border-t border-slate-100">
-              <h3 className="font-bold text-slate-800 mb-4">Permissões de Acesso</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-6">
-                {modules.map(module => (
-                  <div key={module} className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 pb-2 border-b border-slate-200">
-                      {module}
-                    </h4>
-                    <div className="space-y-3">
-                      {allPermissions.filter(p => p.module === module).map(perm => {
-                        const isSelected = selectedPerms.includes(perm.slug);
-                        return (
-                          <label key={perm.slug} className="flex items-start gap-3 cursor-pointer group">
-                            <div className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'bg-primary-500 border-primary-500' : 'bg-white border-slate-300 group-hover:border-primary-400'}`}>
-                              {isSelected && <Check size={12} className="text-white" />}
-                            </div>
-                            <input 
-                              type="checkbox"
-                              className="hidden"
-                              checked={isSelected}
-                              onChange={() => togglePermission(perm.slug)}
-                            />
-                            <div>
-                              <div className="text-sm font-bold text-slate-700 group-hover:text-primary-700 transition-colors">{perm.name}</div>
-                              <div className="text-[10px] text-slate-500 leading-tight mt-0.5">{perm.description}</div>
-                            </div>
-                          </label>
-                        );
-                      })}
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-bold text-slate-800">Matriz de Permissões Granulares (RBAC P8)</h3>
+                  <p className="text-xs text-slate-500">
+                    {selectedPerms.length} de {allPermissions.length} permissões concedidas a este perfil
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPerms(allPermissions.map(p => p.slug))}
+                    className="text-xs font-semibold text-primary-600 hover:text-primary-700 px-2 py-1 bg-primary-50 hover:bg-primary-100 rounded"
+                  >
+                    Marcar Todas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPerms([])}
+                    className="text-xs font-semibold text-slate-500 hover:text-slate-700 px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded"
+                  >
+                    Limpar
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
+                {modules.map(module => {
+                  const modulePerms = allPermissions.filter(p => p.module === module);
+                  const isAllModuleSelected = modulePerms.every(p => selectedPerms.includes(p.slug));
+                  const selectedCount = modulePerms.filter(p => selectedPerms.includes(p.slug)).length;
+
+                  return (
+                    <div key={module} className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col">
+                      <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-200">
+                        <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                          {module}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => toggleModulePermissions(module)}
+                          className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-primary-600"
+                        >
+                          {isAllModuleSelected ? <CheckSquare size={13} className="text-primary-600" /> : <Square size={13} />}
+                          <span>{selectedCount}/{modulePerms.length}</span>
+                        </button>
+                      </div>
+
+                      <div className="space-y-2.5 flex-1">
+                        {modulePerms.map(perm => {
+                          const isSelected = selectedPerms.includes(perm.slug);
+                          return (
+                            <label key={perm.slug} className="flex items-start gap-2.5 cursor-pointer group">
+                              <div className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                                isSelected ? 'bg-primary-600 border-primary-600' : 'bg-white border-slate-300 group-hover:border-primary-400'
+                              }`}>
+                                {isSelected && <Check size={12} className="text-white" strokeWidth={3} />}
+                              </div>
+                              <input 
+                                type="checkbox"
+                                className="hidden"
+                                checked={isSelected}
+                                onChange={() => togglePermission(perm.slug)}
+                              />
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold text-slate-700 group-hover:text-primary-700 transition-colors">
+                                  {perm.name}
+                                </div>
+                                <div className="text-[10px] text-slate-400 leading-tight mt-0.5">
+                                  {perm.description}
+                                </div>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
 
-          <div className="p-6 border-t border-slate-100 bg-slate-50/50 shrink-0 flex justify-end gap-3">
+          <div className="p-5 border-t border-slate-100 bg-slate-50/50 shrink-0 flex justify-end gap-3">
             <button 
               type="button"
               onClick={onClose}
-              className="py-2.5 px-6 bg-white border border-slate-200 text-slate-700 rounded-lg font-bold text-sm hover:bg-slate-50 transition-colors"
+              disabled={loading}
+              className="py-2 px-5 bg-white border border-slate-200 text-slate-700 rounded-lg font-bold text-sm hover:bg-slate-50 transition-colors"
             >
               Cancelar
             </button>
             <button 
               type="submit"
               disabled={loading}
-              className="py-2.5 px-6 bg-primary-600 text-white rounded-lg font-bold text-sm hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              className="py-2 px-6 bg-primary-600 text-white rounded-lg font-bold text-sm hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm"
             >
-              {loading ? "Salvando..." : "Salvar Perfil"}
+              {loading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                  <span>Salvando...</span>
+                </>
+              ) : (
+                <>
+                  <Check size={16} />
+                  <span>{isClone ? "Criar Perfil Clonado" : roleToEdit ? "Salvar Alterações" : "Criar Perfil"}</span>
+                </>
+              )}
             </button>
           </div>
         </form>

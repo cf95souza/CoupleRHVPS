@@ -17,8 +17,12 @@ export interface User {
   role?: string;
   roles?: string[];
   tenant_id?: string;
+  tenant_name?: string;
   company_id?: string;
   worker_id?: string;
+  permissions?: string[];
+  scope_mode?: string;
+  isSystemAdmin?: boolean;
   user_metadata?: Record<string, any>;
   app_metadata?: Record<string, any>;
 }

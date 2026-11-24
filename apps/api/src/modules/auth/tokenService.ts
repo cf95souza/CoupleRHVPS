@@ -239,6 +239,19 @@ export class TokenService {
   }
 
   /**
+   * Revoga uma sessão ativa pelo ID independentemente de usuário (uso restrito de governança/admin)
+   */
+  public async adminRevokeSession(sessionId: string): Promise<boolean> {
+    const query = `
+      UPDATE public.user_sessions
+      SET revoked_at = NOW()
+      WHERE id = $1 AND revoked_at IS NULL;
+    `;
+    const res = await this.pool.query(query, [sessionId]);
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  /**
    * Lista as sessões ativas do usuário
    */
   public async getActiveSessions(userId: string): Promise<Array<{
@@ -257,6 +270,37 @@ export class TokenService {
       ORDER BY last_seen_at DESC;
     `;
     const res = await this.pool.query(query, [userId]);
+    return res.rows;
+  }
+
+  /**
+   * Lista todas as sessões ativas dos usuários de um determinado Tenant (Visão de Governança)
+   */
+  public async getTenantActiveSessions(tenantId: string): Promise<Array<{
+    id: string;
+    user_id: string;
+    user_email: string;
+    user_name: string;
+    aal: string;
+    ip_address: string | null;
+    user_agent: string | null;
+    created_at: string;
+    last_seen_at: string;
+    expires_at: string;
+  }>> {
+    const query = `
+      SELECT 
+        s.id, s.user_id, s.aal, s.ip_address, s.user_agent, s.created_at, s.last_seen_at, s.expires_at,
+        u.email as user_email,
+        COALESCE(up.full_name, u.email) as user_name
+      FROM public.user_sessions s
+      JOIN public.tenant_users tu ON tu.user_id = s.user_id AND tu.tenant_id = $1
+      JOIN public.users u ON u.id = s.user_id
+      LEFT JOIN public.user_profiles up ON up.id = s.user_id
+      WHERE s.revoked_at IS NULL AND s.expires_at > NOW()
+      ORDER BY s.last_seen_at DESC;
+    `;
+    const res = await this.pool.query(query, [tenantId]);
     return res.rows;
   }
 
