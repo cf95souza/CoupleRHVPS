@@ -578,8 +578,21 @@ export async function runEtlMigration(options: EtlOptions = {}): Promise<Reconci
     ];
 
     const entityCounts: ReconciliationReport['entityCounts'] = [];
+    const legacyTenantIds = tenants.map((t: any) => t.id);
     for (const ec of entityChecks) {
-      const res = await client.query(`SELECT count(*)::int as count FROM ${ec.table}`);
+      let queryStr: string;
+      let params: any[];
+      if (ec.table === 'public.users') {
+        queryStr = `SELECT count(*)::int as count FROM ${ec.table} WHERE id = ANY($1)`;
+        params = [authUsers.map((u: any) => u.id)];
+      } else if (ec.table === 'public.tenants') {
+        queryStr = `SELECT count(*)::int as count FROM ${ec.table} WHERE id = ANY($1)`;
+        params = [legacyTenantIds];
+      } else {
+        queryStr = `SELECT count(*)::int as count FROM ${ec.table} WHERE tenant_id = ANY($1)`;
+        params = [legacyTenantIds];
+      }
+      const res = await client.query(queryStr, params);
       const dbCount = res.rows[0].count;
       entityCounts.push({
         entity: ec.entity,
@@ -589,20 +602,26 @@ export async function runEtlMigration(options: EtlOptions = {}): Promise<Reconci
       });
     }
 
-    // Reconciliação Financeira de Folha de Pagamento
+    // Reconciliação Financeira de Folha de Pagamento no escopo do Tenant Legado
     const legacyNetSalary = payslips.reduce((acc: number, p: any) => acc + Math.round(Number(p.net_salary || 0) * 100), 0) / 100;
     const legacyGrossSalary = payslips.reduce((acc: number, p: any) => acc + Math.round(Number(p.gross_salary || 0) * 100), 0) / 100;
 
-    const netSalaryRes = await client.query('SELECT COALESCE(SUM(net_salary), 0)::numeric as net, COALESCE(SUM(gross_salary), 0)::numeric as gross FROM public.payslips');
+    const netSalaryRes = await client.query(
+      'SELECT COALESCE(SUM(net_salary), 0)::numeric as net, COALESCE(SUM(gross_salary), 0)::numeric as gross FROM public.payslips WHERE tenant_id = ANY($1)',
+      [legacyTenantIds]
+    );
     const dbNetSalary = Number(netSalaryRes.rows[0].net);
     const dbGrossSalary = Number(netSalaryRes.rows[0].gross);
 
     const diffNetSalary = Math.abs(Math.round((legacyNetSalary - dbNetSalary) * 100) / 100);
     const diffGrossSalary = Math.abs(Math.round((legacyGrossSalary - dbGrossSalary) * 100) / 100);
 
-    // Reconciliação de Banco de Horas
+    // Reconciliação de Banco de Horas no escopo do Tenant Legado
     const legacyBalanceMinutes = timeBankAccounts.reduce((acc: number, t: any) => acc + (Number(t.balance_minutes) || 0), 0);
-    const timeBankRes = await client.query('SELECT COALESCE(SUM(balance_minutes), 0)::int as minutes FROM public.time_bank_accounts');
+    const timeBankRes = await client.query(
+      'SELECT COALESCE(SUM(balance_minutes), 0)::int as minutes FROM public.time_bank_accounts WHERE tenant_id = ANY($1)',
+      [legacyTenantIds]
+    );
     const dbBalanceMinutes = Number(timeBankRes.rows[0].minutes);
     const diffBalanceMinutes = Math.abs(legacyBalanceMinutes - dbBalanceMinutes);
 

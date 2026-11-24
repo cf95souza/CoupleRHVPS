@@ -9,6 +9,13 @@ import { dbPool } from './shared/db/pool.js';
 import { storageRoutes } from './modules/storage/storageRoutes.js';
 import { observabilityRoutes } from './modules/observability/observabilityRoutes.js';
 import { authRoutes } from './modules/auth/authRoutes.js';
+import { publicRoutes } from './modules/public/publicRoutes.js';
+import { userAccessRoutes } from './modules/users/userAccessRoutes.js';
+import { payrollPeriodRoutes } from './modules/payroll/payrollPeriodRoutes.js';
+import { timeTrackingRoutes } from './modules/time-tracking/timeTrackingRoutes.js';
+import { documentRoutes } from './modules/documents/documentRoutes.js';
+import { terminationRoutes } from './modules/termination/terminationRoutes.js';
+import { biRoutes } from './modules/bi/biRoutes.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -93,6 +100,17 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // Modulo de Autenticacao Nativa (RH/Admin e Portal do Colaborador)
   await app.register(authRoutes, { prefix: '/api/v1/auth' });
+
+  // Rotas Publicas de Verificacao LGPD (Unicas sem exigencia de autenticacao)
+  await app.register(publicRoutes, { prefix: '/api/v1/public' });
+
+  // Modulos Protegidos de Seguranca, Folha, Ponto, Documentos, Rescisao e BI
+  await app.register(userAccessRoutes, { prefix: '/api/v1/users' });
+  await app.register(payrollPeriodRoutes, { prefix: '/api/v1/payroll' });
+  await app.register(timeTrackingRoutes, { prefix: '/api/v1/time-tracking' });
+  await app.register(documentRoutes, { prefix: '/api/v1/documents' });
+  await app.register(terminationRoutes, { prefix: '/api/v1/termination' });
+  await app.register(biRoutes, { prefix: '/api/v1/bi' });
 
   return app;
 }

@@ -32,7 +32,7 @@ describe('ETL Idempotente Legado -> PostgreSQL 17 Puro', () => {
   it('deve executar Dry-Run no PostgreSQL 17 com reconciliacao financeira R$ 0,00 e 0 registros orfaos', async () => {
     const report = await runEtlMigration({
       dryRun: true,
-      silent: true,
+      silent: false,
       connectionString:
         process.env.DATABASE_ADMIN_URL ||
         process.env.DATABASE_URL ||
