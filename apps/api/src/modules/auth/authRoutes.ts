@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { AuthService } from './authService.js';
 import { PasswordResetService } from './passwordResetService.js';
 import { authenticate, requireAdminRole } from './authMiddleware.js';
+import { getUserPermissions } from './rbacMiddleware.js';
 import { dbPool } from '../../shared/db/pool.js';
 import { env } from '../../config/env.js';
 
@@ -661,5 +662,120 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
         tenant_id: request.user!.tenant_id,
       },
     };
+  });
+
+  /**
+   * GET /api/v1/auth/permissions
+   * Retorna os slugs de permissões ativas para o usuário logado no tenant (RBAC-01)
+   */
+  app.get('/permissions', { preHandler: [authenticate] }, async (request, reply) => {
+    const user = request.user!;
+    const tenantId = user.tenant_id;
+
+    if (!tenantId && user.role !== 'system_admin') {
+      return reply.status(400).send({
+        success: false,
+        error: 'Contexto de empresa (tenant) obrigatório para consulta de permissões.',
+      });
+    }
+
+    try {
+      let permissions: string[] = [];
+      if (request.withContext) {
+        permissions = await request.withContext(async (client) => {
+          return getUserPermissions(client, user.sub, tenantId || '', user.role);
+        });
+      } else {
+        const client = await dbPool.connect();
+        try {
+          permissions = await getUserPermissions(client, user.sub, tenantId || '', user.role);
+        } finally {
+          client.release();
+        }
+      }
+
+      return reply.send({
+        success: true,
+        role: user.role,
+        isSystemAdmin: user.role === 'system_admin',
+        permissions,
+      });
+    } catch (err: any) {
+      request.log.error(err, '[AUTH_PERMISSIONS] Falha ao recuperar permissões');
+      return reply.status(500).send({
+        success: false,
+        error: 'Falha ao recuperar permissões do usuário.',
+      });
+    }
+  });
+
+  /**
+   * GET /api/v1/auth/permissions/catalog
+   * Retorna o catálogo oficial de permissões cadastradas no sistema
+   */
+  app.get('/permissions/catalog', { preHandler: [authenticate] }, async (request, reply) => {
+    try {
+      const { rows } = await dbPool.query(`
+        SELECT id, name, slug, category, description
+        FROM public.permissions
+        ORDER BY category, name;
+      `);
+
+      return reply.send({
+        success: true,
+        count: rows.length,
+        permissions: rows,
+      });
+    } catch (err: any) {
+      request.log.error(err, '[PERMISSIONS_CATALOG] Erro ao listar catálogo');
+      return reply.status(500).send({
+        success: false,
+        error: 'Falha ao consultar catálogo de permissões.',
+      });
+    }
+  });
+
+  /**
+   * GET /api/v1/auth/roles
+   * Retorna os papéis disponíveis para o tenant (papéis de sistema e customizados)
+   */
+  app.get('/roles', { preHandler: [authenticate] }, async (request, reply) => {
+    const tenantId = request.user!.tenant_id;
+
+    try {
+      let rows: any[] = [];
+      if (request.withContext) {
+        rows = await request.withContext(async (client) => {
+          const res = await client.query(
+            `SELECT id, name, slug, description, is_system, tenant_id
+             FROM public.roles
+             WHERE (tenant_id = $1::uuid OR (is_system = TRUE AND tenant_id IS NULL))
+             ORDER BY is_system DESC, name ASC;`,
+            [tenantId || null]
+          );
+          return res.rows;
+        });
+      } else {
+        const res = await dbPool.query(
+          `SELECT id, name, slug, description, is_system, tenant_id
+           FROM public.roles
+           WHERE (tenant_id = $1::uuid OR (is_system = TRUE AND tenant_id IS NULL))
+           ORDER BY is_system DESC, name ASC;`,
+          [tenantId || null]
+        );
+        rows = res.rows;
+      }
+
+      return reply.send({
+        success: true,
+        roles: rows,
+      });
+    } catch (err: any) {
+      request.log.error(err, '[AUTH_ROLES] Erro ao listar papéis');
+      return reply.status(500).send({
+        success: false,
+        error: 'Falha ao consultar papéis de usuário.',
+      });
+    }
   });
 };

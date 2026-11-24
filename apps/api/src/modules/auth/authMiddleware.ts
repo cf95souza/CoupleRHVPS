@@ -126,3 +126,12 @@ export async function requireAdminRole(request: FastifyRequest, reply: FastifyRe
   }
 }
 
+// Re-exportações do motor RBAC dinâmico (RBAC-01)
+export {
+  requirePermission,
+  requireAnyPermission,
+  checkUserPermission,
+  getUserPermissions,
+} from './rbacMiddleware.js';
+
+
