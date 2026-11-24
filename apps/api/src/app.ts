@@ -16,6 +16,13 @@ import { timeTrackingRoutes } from './modules/time-tracking/timeTrackingRoutes.j
 import { documentRoutes } from './modules/documents/documentRoutes.js';
 import { terminationRoutes } from './modules/termination/terminationRoutes.js';
 import { biRoutes } from './modules/bi/biRoutes.js';
+import { employeeRoutes } from './modules/employees/employeeRoutes.js';
+import { leaveRoutes } from './modules/leaves/leaveRoutes.js';
+import { orgRoutes } from './modules/org/orgRoutes.js';
+import { vacationRoutes } from './modules/vacations/vacationRoutes.js';
+import { portalRoutes } from './modules/portal/portalRoutes.js';
+import { settingsRoutes } from './modules/settings/settingsRoutes.js';
+import { dataBridgeRoutes } from './modules/data/dataBridgeRoutes.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -111,6 +118,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(documentRoutes, { prefix: '/api/v1/documents' });
   await app.register(terminationRoutes, { prefix: '/api/v1/termination' });
   await app.register(biRoutes, { prefix: '/api/v1/bi' });
+  await app.register(employeeRoutes, { prefix: '/api/v1/employees' });
+  await app.register(leaveRoutes, { prefix: '/api/v1/leaves' });
+  await app.register(orgRoutes, { prefix: '/api/v1/org' });
+  await app.register(vacationRoutes, { prefix: '/api/v1/vacations' });
+  await app.register(portalRoutes, { prefix: '/api/v1/portal' });
+  await app.register(settingsRoutes, { prefix: '/api/v1/settings' });
+  await app.register(dataBridgeRoutes, { prefix: '/api/v1' });
 
   return app;
 }
