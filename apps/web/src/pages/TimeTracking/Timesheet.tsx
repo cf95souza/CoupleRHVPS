@@ -8,7 +8,7 @@ import {
   Calendar,
   Zap
 } from "lucide-react";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../lib/apiClient";
 import { useCompany } from "../../contexts/CompanyContext";
 import { Pagination } from "../../components/Pagination";
 import { TimeClosureService } from "../../services/timeTracking/timeClosureService";

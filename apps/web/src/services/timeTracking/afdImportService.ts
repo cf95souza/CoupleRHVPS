@@ -1,4 +1,4 @@
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/apiClient';
 import { parseAfdContent, calculateFileSha256 } from './afdParser';
 import type { TimePunchRecord } from './timeTrackingModel';
 

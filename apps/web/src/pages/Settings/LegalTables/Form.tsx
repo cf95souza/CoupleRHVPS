@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Save, Calculator, Plus, Trash2 } from 'lucide-react';
-import { supabase } from '../../../lib/supabase';
+import { supabase } from '../../../lib/apiClient';
 import { toast } from 'sonner';
 
 interface Bracket {

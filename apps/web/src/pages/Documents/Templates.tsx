@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Search, Plus, FileText, Edit3, Trash2, Loader2, MoreVertical } from "lucide-react";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../lib/apiClient";
 import { Pagination } from "../../components/Pagination";
 
 interface DocumentTemplate {

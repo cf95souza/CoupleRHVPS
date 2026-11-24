@@ -7,7 +7,7 @@ import {
   AlertCircle
 } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
-import { supabase } from "../../../lib/supabase";
+import { supabase } from "../../../lib/apiClient";
 import { useAuth } from "../../../contexts/AuthContext";
 import { useCompany } from "../../../contexts/CompanyContext";
 

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Users, Plus, Shield, Edit, Trash2, Mail, UserPlus, Key, Check, Briefcase, CheckCircle2, XCircle } from "lucide-react";
-import { supabase } from "../../../lib/supabase";
+import { supabase } from "../../../lib/apiClient";
 import InviteUserModal from "./InviteUserModal";
 import RoleModal from "./RoleModal";
 import EditUserModal from "./EditUserModal";

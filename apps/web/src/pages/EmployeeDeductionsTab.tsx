@@ -13,7 +13,7 @@ import {
   Trash2,
   Edit,
 } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { supabase } from "../lib/apiClient";
 import { formatDate } from "../lib/dateUtils";
 import { toast } from 'sonner';
 import { confirmDialog } from '../components/ConfirmDialogProvider';

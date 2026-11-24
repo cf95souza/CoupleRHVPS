@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Loader2, TrendingUp, Briefcase, Network } from "lucide-react";
-import { supabase } from "../../../lib/supabase";
+import { supabase } from "../../../lib/apiClient";
 import { format } from "date-fns";
 import Movements from "../../Movements";
 

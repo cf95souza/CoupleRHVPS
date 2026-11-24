@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Plus, Save, Loader2, AlertCircle, Clock, CalendarDays, X } from "lucide-react";
-import { supabase } from "../../../lib/supabase";
+import { supabase } from "../../../lib/apiClient";
 import { useAuth } from "../../../contexts/AuthContext";
 import { useCompany } from "../../../contexts/CompanyContext";
 import { formatDate } from "../../../lib/dateUtils";

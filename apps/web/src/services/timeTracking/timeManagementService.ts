@@ -8,7 +8,7 @@
  * - Central de Aprovações (Ajustes de Ponto, Contestações de Espelho e Compensações de Banco de Horas)
  */
 
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/apiClient';
 import {
   TimeBankService,
   type TimeBankPolicyType,

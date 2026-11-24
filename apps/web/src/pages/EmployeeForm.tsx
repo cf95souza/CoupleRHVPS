@@ -11,7 +11,7 @@ import {
   MapPin,
   Bus,
 } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { supabase } from "../lib/apiClient";
 
 export default function EmployeeForm() {
   const navigate = useNavigate();

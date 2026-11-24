@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { X, Mail, UserPlus, Briefcase, Shield } from "lucide-react";
-import { supabase } from "../../../lib/supabase";
+import { supabase } from "../../../lib/apiClient";
 import { resolveRoleEnum, type WorkerOption } from "../../../services/settings/userManagementService";
 import { toast } from "sonner";
 

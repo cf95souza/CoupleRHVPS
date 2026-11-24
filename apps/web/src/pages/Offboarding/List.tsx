@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Search, UserMinus, ChevronRight, Loader2, Edit2, FileText } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../lib/apiClient";
 import { formatDate } from "../../lib/dateUtils";
 import TRCTViewer from "./components/TRCTViewer";
 import { Pagination } from "../../components/Pagination";

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { supabase } from "../lib/supabase";
+import { supabase } from "../lib/apiClient";
 import { Lock, ArrowRight, Loader2 } from "lucide-react";
 
 export default function Login() {

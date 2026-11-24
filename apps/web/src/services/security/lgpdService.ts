@@ -4,7 +4,7 @@
  * e Legislação Trabalhista Brasileira (CLT, CF Art. 7º XXIX, Portaria MTP 671/2021 e Normas Regulamentadoras)
  */
 
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/apiClient';
 
 export enum LgpdLegalBasis {
   CONSENT = 'CONSENT',                               // Art. 7º, I (Consentimento do titular)

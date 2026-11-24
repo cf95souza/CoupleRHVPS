@@ -17,7 +17,7 @@ import {
   X,
   Share2
 } from "lucide-react";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../lib/apiClient";
 import { Pagination } from "../../components/Pagination";
 import { DocumentComplianceService } from "../../services/documents/documentComplianceService";
 import { toast } from "sonner";

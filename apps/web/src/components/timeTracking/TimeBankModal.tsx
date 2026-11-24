@@ -11,7 +11,7 @@ import {
   ShieldCheck,
   ChevronRight
 } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/apiClient';
 import {
   formatMinutesToHours,
   TimeBankService,

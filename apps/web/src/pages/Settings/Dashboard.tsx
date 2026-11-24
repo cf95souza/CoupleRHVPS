@@ -7,7 +7,7 @@ import CertificatesTab from "./components/CertificatesTab";
 import ExportDataTab from "./components/ExportDataTab";
 import { OperationalAlertsPanel } from "../../components/observability/OperationalAlertsPanel";
 import { toast } from "sonner";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../lib/apiClient";
 import { TenantSettingsService, SUPPORTED_TIMEZONES } from "../../services/settings/tenantSettingsService";
 
 type Tab = 'gerais' | 'perfis' | 'seguranca' | 'notificacoes' | 'certificados' | 'exportar' | 'alertas';

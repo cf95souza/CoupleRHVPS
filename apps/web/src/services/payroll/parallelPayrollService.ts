@@ -1,4 +1,4 @@
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/apiClient';
 import { sha256Sync } from '../../utils/sha256';
 
 export interface LegacyPayrollRubricItem {

@@ -6,7 +6,7 @@
  * e canais corporativos (E-mail DP, WhatsApp e In-App).
  */
 
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/apiClient';
 
 export interface TenantNotificationSettings {
   id?: string;

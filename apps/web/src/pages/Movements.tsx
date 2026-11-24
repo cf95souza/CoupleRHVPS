@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { ArrowLeft, TrendingUp, Loader2, Save } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "../lib/supabase";
+import { supabase } from "../lib/apiClient";
 import { toast } from 'sonner';
 
 interface MovementsProps {

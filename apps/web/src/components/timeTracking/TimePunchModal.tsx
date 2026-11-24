@@ -15,7 +15,7 @@ import {
   Home,
   Navigation
 } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/apiClient';
 import { toast } from 'sonner';
 import {
   fetchContractWorkplaceGeofence,

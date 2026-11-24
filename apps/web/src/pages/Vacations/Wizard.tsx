@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { ArrowLeft, Check, CalendarDays, Save, Search, AlertCircle, Loader2 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../lib/apiClient";
 import { vacationService } from "../../services/vacationService";
 import { useCompany } from "../../contexts/CompanyContext";
 import { formatDate } from "../../lib/dateUtils";

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { ArrowLeft, Save, Building2 } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../lib/apiClient";
 import { useAuth } from "../../contexts/AuthContext";
 
 export default function CompanyForm() {

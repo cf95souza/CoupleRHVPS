@@ -19,7 +19,7 @@ import {
   type BackupProgress 
 } from "../../../services/settings/tenantBackupService";
 import { LGPDService, RetentionDomain } from "../../../services/security/lgpdService";
-import { supabase } from "../../../lib/supabase";
+import { supabase } from "../../../lib/apiClient";
 
 export default function ExportDataTab() {
   const [exportingBackup, setExportingBackup] = useState(false);

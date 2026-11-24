@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Plus, Users, Loader2, AlertCircle, Pencil, Trash2, Calendar, FileText } from "lucide-react";
-import { supabase } from "../../../lib/supabase";
+import { supabase } from "../../../lib/apiClient";
 import { useAuth } from "../../../contexts/AuthContext";
 import { format, parseISO } from "date-fns";
 import { formatDate } from "../../../lib/dateUtils";

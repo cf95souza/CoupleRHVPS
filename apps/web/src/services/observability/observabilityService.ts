@@ -1,4 +1,4 @@
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/apiClient';
 import { LGPDService } from '../security/lgpdService';
 
 export type AlertSubsystem = 'PAYROLL' | 'TIME_TRACKING' | 'SECURITY' | 'DOCUMENT_SIGNING' | 'GENERAL';

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, User, ArrowRight, AlertCircle, Calendar } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/apiClient';
 
 export default function EmployeePortalLogin() {
   const [cpf, setCpf] = useState('');

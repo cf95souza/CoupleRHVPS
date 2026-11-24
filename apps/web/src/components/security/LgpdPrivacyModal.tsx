@@ -19,7 +19,7 @@ import {
   LgpdRequestType,
   RetentionDomain
 } from '../../services/security/lgpdService';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/apiClient';
 import { toast } from 'sonner';
 
 interface LgpdPrivacyModalProps {

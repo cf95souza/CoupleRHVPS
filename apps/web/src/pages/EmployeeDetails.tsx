@@ -16,7 +16,7 @@ import {
   Receipt,
   Landmark,
 } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { supabase } from "../lib/apiClient";
 import { formatDate } from "../lib/dateUtils";
 import EmployeeBenefitsTab from "./EmployeeBenefitsTab";
 import EmployeeDeductionsTab from "./EmployeeDeductionsTab";

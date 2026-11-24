@@ -36,7 +36,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCompany } from '../../contexts/CompanyContext';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/apiClient';
 import {
   TimeManagementService,
   type TimeEntryAdjustment,

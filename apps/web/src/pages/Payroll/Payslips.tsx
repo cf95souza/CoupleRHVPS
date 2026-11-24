@@ -11,7 +11,7 @@ import {
   X,
   Code
 } from "lucide-react";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../lib/apiClient";
 import { Pagination } from "../../components/Pagination";
 import { useCompany } from "../../contexts/CompanyContext";
 import { toast } from 'sonner';

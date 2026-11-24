@@ -8,6 +8,7 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit || echo 'Web typecheck em transicao (V2)'",
     "preview": "vite preview",
+    "test": "vitest run",
     "lint": "echo 'Lint web OK'"
   },
   "dependencies": {

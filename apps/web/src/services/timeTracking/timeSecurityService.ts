@@ -10,7 +10,7 @@
  * - Controle de Acesso e Isolamento Estrito de Dados por Colaborador / Papel (RBAC)
  */
 
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/apiClient';
 
 export interface LgpdConsentRecord {
   id?: string;

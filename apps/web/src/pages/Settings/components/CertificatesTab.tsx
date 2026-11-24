@@ -23,7 +23,7 @@ import {
   type CertificateStatus 
 } from "../../../services/settings/certificateService";
 import UploadCertificateModal from "./UploadCertificateModal";
-import { supabase } from "../../../lib/supabase";
+import { supabase } from "../../../lib/apiClient";
 
 export default function CertificatesTab() {
   const [loading, setLoading] = useState(true);

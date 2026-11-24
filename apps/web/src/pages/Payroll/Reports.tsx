@@ -12,7 +12,7 @@ import {
   FileSpreadsheet,
   Receipt
 } from "lucide-react";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../lib/apiClient";
 import { formatDate } from "../../lib/dateUtils";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";

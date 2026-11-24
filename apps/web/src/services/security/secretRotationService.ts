@@ -4,7 +4,7 @@
  * em conformidade com o §9 do Documento de Melhorias de Produção.
  */
 
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/apiClient';
 
 export interface DeviceApiKeyRotationResult {
   deviceId: string;

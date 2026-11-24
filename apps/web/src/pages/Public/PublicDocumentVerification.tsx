@@ -15,7 +15,7 @@ import {
   ExternalLink,
   Loader2
 } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/apiClient';
 import {
   computeCanonicalHash,
   formatVerificationCode,

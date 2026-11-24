@@ -17,7 +17,7 @@ import {
   History,
   Copy,
 } from "lucide-react";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../lib/apiClient";
 import { Pagination } from "../../components/Pagination";
 import { toast } from 'sonner';
 import { confirmDialog } from '../../components/ConfirmDialogProvider';

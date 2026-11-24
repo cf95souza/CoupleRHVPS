@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Save, Loader2, AlertCircle, Building, Wallet } from "lucide-react";
-import { supabase } from "../../../lib/supabase";
+import { supabase } from "../../../lib/apiClient";
 
 export default function BankingDataTab({ workerId, initialData, onSaved }: any) {
   const [loading, setLoading] = useState(false);

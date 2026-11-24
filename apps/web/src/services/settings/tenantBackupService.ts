@@ -6,7 +6,7 @@
  * integridade corporativa de governança do coupleRH.
  */
 
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/apiClient';
 
 export interface BackupProgress {
   stage: string;

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { supabase } from "../../../lib/supabase";
+import { supabase } from "../../../lib/apiClient";
 import { Plus, X, Loader2, Save } from "lucide-react";
 import { createPortal } from "react-dom";
 import { toast } from 'sonner';

@@ -13,7 +13,7 @@ import {
   ListPlus,
   RefreshCw
 } from "lucide-react";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../lib/apiClient";
 import { useCompany } from "../../contexts/CompanyContext";
 import { toast } from 'sonner';
 import { confirmDialog } from '../../components/ConfirmDialogProvider';

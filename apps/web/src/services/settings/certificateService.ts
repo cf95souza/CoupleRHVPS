@@ -5,7 +5,7 @@
  * para transmissão eSocial (CONF-05).
  */
 
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/apiClient';
 
 export type CertificateStatus = 'VALID' | 'EXPIRING_SOON' | 'EXPIRED' | 'NOT_CONFIGURED';
 

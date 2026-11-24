@@ -12,7 +12,7 @@ import {
   CalendarDays,
   Clock,
 } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { supabase } from "../lib/apiClient";
 import { Link } from "react-router-dom";
 
 export default function Dashboard() {

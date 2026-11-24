@@ -17,7 +17,7 @@ import {
   ShieldCheck,
   TrendingUp,
 } from "lucide-react";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../lib/apiClient";
 import { useCompany } from "../../contexts/CompanyContext";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";

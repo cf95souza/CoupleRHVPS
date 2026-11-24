@@ -12,7 +12,7 @@ import {
   ChevronDown
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../lib/apiClient";
 import { useCompany } from "../../contexts/CompanyContext";
 import { Pagination } from "../../components/Pagination";
 

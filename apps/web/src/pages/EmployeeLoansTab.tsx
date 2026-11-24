@@ -17,7 +17,7 @@ import {
   Layers,
   Sparkles
 } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { supabase } from "../lib/apiClient";
 import { toast } from "sonner";
 import { confirmDialog } from "../components/ConfirmDialogProvider";
 import { formatCurrency, formatDate } from "../lib/dateUtils";

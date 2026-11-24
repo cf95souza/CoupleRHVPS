@@ -1,4 +1,4 @@
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/apiClient';
 
 export type PreFlightFindingSeverity = 'CRITICAL' | 'WARNING' | 'INFO';
 

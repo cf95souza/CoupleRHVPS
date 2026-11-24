@@ -11,7 +11,7 @@ import {
   X,
   Trash2
 } from "lucide-react";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../lib/apiClient";
 import { formatDate } from "../../lib/dateUtils";
 import { Pagination } from "../../components/Pagination";
 import { toast } from 'sonner';

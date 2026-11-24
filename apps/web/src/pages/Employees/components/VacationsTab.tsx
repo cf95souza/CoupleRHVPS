@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Plus, Calendar, AlertCircle, FileText, CheckCircle2 } from "lucide-react";
-import { supabase } from "../../../lib/supabase";
+import { supabase } from "../../../lib/apiClient";
 import { vacationService } from "../../../services/vacationService";
 import { generateAvisoHTML, generateReciboHTML } from "../../../utils/vacationPrint";
 import VacationWizard from "../../Vacations/Wizard";

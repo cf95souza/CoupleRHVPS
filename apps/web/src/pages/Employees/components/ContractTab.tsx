@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Save, Loader2, AlertCircle, Briefcase } from "lucide-react";
-import { supabase } from "../../../lib/supabase";
+import { supabase } from "../../../lib/apiClient";
 import { useAuth } from "../../../contexts/AuthContext";
 import { useCompany } from "../../../contexts/CompanyContext";
 

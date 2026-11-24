@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect } from "react";
 import type { ReactNode } from "react";
-import { supabase } from "../lib/supabase";
+import { supabase } from "../lib/apiClient";
 import { useAuth } from "./AuthContext";
 
 interface Company {
