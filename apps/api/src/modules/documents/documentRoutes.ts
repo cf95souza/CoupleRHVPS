@@ -35,14 +35,14 @@ export const documentRoutes: FastifyPluginAsync = async (app) => {
 
       try {
         const result = await request.withContext(async (client) => {
-          // 1. Busca documento
+          // 1. Busca documento (via função com isolamento de tenant para validação precisa de titularidade)
           const { rows: docRows } = await client.query<{
             id: string;
             worker_id: string;
             status: string;
             tenant_id: string;
           }>(
-            'SELECT id, worker_id, status, tenant_id FROM public.employee_documents WHERE id = $1;',
+            'SELECT id, worker_id, status, tenant_id FROM public.get_document_for_signature($1);',
             [id]
           );
 

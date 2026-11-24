@@ -86,23 +86,7 @@ BEGIN
         RETURN FALSE;
     END IF;
 
-    -- 1. Obter dados do contrato no tenant
-    SELECT 
-        c.worker_id, c.company_id, c.establishment_id, c.department_id,
-        c.sector_id, c.cost_center_id, c.workplace_id, c.manager_worker_id,
-        COALESCE(c.is_confidential_payroll, FALSE)
-    INTO 
-        v_worker_id, v_company_id, v_establishment_id, v_department_id,
-        v_sector_id, v_cost_center_id, v_workplace_id, v_manager_worker_id,
-        v_is_confidential
-    FROM public.contracts c
-    WHERE c.id = p_contract_id AND c.tenant_id = p_tenant_id;
-
-    IF NOT FOUND THEN
-        RETURN FALSE;
-    END IF;
-
-    -- 2. Obter vínculo do usuário no tenant
+    -- 1. Obter vínculo do usuário no tenant
     SELECT 
         tu.role,
         COALESCE(tu.scope_mode, 'ALL'),
@@ -118,6 +102,39 @@ BEGIN
     WHERE tu.user_id = v_user_id AND tu.tenant_id = p_tenant_id;
 
     IF NOT FOUND OR NOT COALESCE(v_is_active, FALSE) THEN
+        RETURN FALSE;
+    END IF;
+
+    -- 2. Super Admin Global possui bypass irrestrito
+    IF v_role = 'system_admin' THEN
+        RETURN TRUE;
+    END IF;
+
+    -- 3. ALL: Acesso irrestrito a todos os contratos da empresa
+    IF v_scope_mode = 'ALL' THEN
+        -- Se for folha confidencial e o contrato existir, valida permissão
+        IF EXISTS (
+            SELECT 1 FROM public.contracts c
+            WHERE c.id = p_contract_id AND c.tenant_id = p_tenant_id AND c.is_confidential_payroll = TRUE
+        ) THEN
+            RETURN public.has_permission(p_tenant_id, 'view_executive_payroll');
+        END IF;
+        RETURN TRUE;
+    END IF;
+
+    -- 4. Obter dados do contrato no tenant (para RESTRICTED, OWN_TEAM, SELF_ONLY)
+    SELECT 
+        c.worker_id, c.company_id, c.establishment_id, c.department_id,
+        c.sector_id, c.cost_center_id, c.workplace_id, c.manager_worker_id,
+        COALESCE(c.is_confidential_payroll, FALSE)
+    INTO 
+        v_worker_id, v_company_id, v_establishment_id, v_department_id,
+        v_sector_id, v_cost_center_id, v_workplace_id, v_manager_worker_id,
+        v_is_confidential
+    FROM public.contracts c
+    WHERE c.id = p_contract_id AND c.tenant_id = p_tenant_id;
+
+    IF NOT FOUND THEN
         RETURN FALSE;
     END IF;
 

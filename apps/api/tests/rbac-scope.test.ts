@@ -124,39 +124,14 @@ describe('Escopo Organizacional Multidimensional e can_access_contract (RBAC-02)
         UPDATE public.departments SET manager_worker_id = '${workerManagerId}' WHERE id = '${deptoLogisticaId}';
       `);
 
-      // 6. Contracts
-      await client.query(`
-        INSERT INTO public.contracts (
-          id, tenant_id, worker_id, company_id, establishment_id, department_id, 
-          position_id, registration_number, admission_date, base_salary, status,
-          manager_worker_id, is_confidential_payroll
-        ) VALUES
-          -- Contrato do próprio Gestor
-          ('${contractManagerId}', '${tenantId}', '${workerManagerId}', '${companyId}', '${estabSpId}', '${deptoLogisticaId}',
-           '${positionAnalistaId}', 'MAT-001', '2020-01-01', 8500.00, 'ACTIVE', NULL, FALSE),
-          -- Contrato Subordinado 1 (SP + Logística + Manager direto)
-          ('${contractSubordinadoLogSpId}', '${tenantId}', '${workerEmployee1Id}', '${companyId}', '${estabSpId}', '${deptoLogisticaId}',
-           '${positionAnalistaId}', 'MAT-002', '2021-03-15', 4200.00, 'ACTIVE', '${workerManagerId}', FALSE),
-          -- Contrato Subordinado 2 (RJ + Logística)
-          ('${contractSubordinadoLogRjId}', '${tenantId}', '${workerEmployee2Id}', '${companyId}', '${estabRjId}', '${deptoLogisticaId}',
-           '${positionAnalistaId}', 'MAT-003', '2022-06-01', 4000.00, 'ACTIVE', NULL, FALSE),
-          -- Contrato Financeiro SP (Outro departamento, outro gestor)
-          ('${contractFinanceiroSpId}', '${tenantId}', '${workerEmployee1Id}', '${companyId}', '${estabSpId}', '${deptoFinanceiroId}',
-           '${positionAnalistaId}', 'MAT-004', '2023-01-10', 5000.00, 'ACTIVE', NULL, FALSE),
-          -- Contrato Confidencial da Diretoria
-          ('${contractConfidencialDiretorId}', '${tenantId}', '${workerDiretorId}', '${companyId}', '${estabSpId}', '${deptoLogisticaId}',
-           '${positionDiretorId}', 'DIR-001', '2019-01-01', 35000.00, 'ACTIVE', NULL, TRUE)
-        ON CONFLICT (id) DO UPDATE SET base_salary = EXCLUDED.base_salary;
-      `);
-
-      // 7. Obter roles de sistema
+      // 6. Obter roles de sistema
       const rolesRes = await client.query(`
         SELECT id, slug FROM public.roles WHERE is_system = TRUE AND tenant_id IS NULL;
       `);
       const roleMap = new Map<string, string>();
       rolesRes.rows.forEach((r: { id: string; slug: string }) => roleMap.set(r.slug, r.id));
 
-      // 8. Vincular Usuários em tenant_users com seus respectivos scope_mode
+      // 7. Vincular Usuários em tenant_users com seus respectivos scope_mode (antes de contracts para autorização RLS)
       await client.query(`
         INSERT INTO public.tenant_users (tenant_id, user_id, role, role_id, worker_id, scope_mode, is_active)
         VALUES
@@ -181,6 +156,31 @@ describe('Escopo Organizacional Multidimensional e can_access_contract (RBAC-02)
         [tenantId, userRestrictedId]
       );
       tenantUserRestrictedId = tuRes.rows[0].id;
+
+      // 8. Contracts (executado com userAdmin autorizado com scope_mode ALL)
+      await client.query(`
+        INSERT INTO public.contracts (
+          id, tenant_id, worker_id, company_id, establishment_id, department_id, 
+          position_id, registration_number, admission_date, base_salary, status,
+          manager_worker_id, is_confidential_payroll
+        ) VALUES
+          -- Contrato do próprio Gestor
+          ('${contractManagerId}', '${tenantId}', '${workerManagerId}', '${companyId}', '${estabSpId}', '${deptoLogisticaId}',
+           '${positionAnalistaId}', 'MAT-001', '2020-01-01', 8500.00, 'ACTIVE', NULL, FALSE),
+          -- Contrato Subordinado 1 (SP + Logística + Manager direto)
+          ('${contractSubordinadoLogSpId}', '${tenantId}', '${workerEmployee1Id}', '${companyId}', '${estabSpId}', '${deptoLogisticaId}',
+           '${positionAnalistaId}', 'MAT-002', '2021-03-15', 4200.00, 'ACTIVE', '${workerManagerId}', FALSE),
+          -- Contrato Subordinado 2 (RJ + Logística)
+          ('${contractSubordinadoLogRjId}', '${tenantId}', '${workerEmployee2Id}', '${companyId}', '${estabRjId}', '${deptoLogisticaId}',
+           '${positionAnalistaId}', 'MAT-003', '2022-06-01', 4000.00, 'ACTIVE', NULL, FALSE),
+          -- Contrato Financeiro SP (Outro departamento, outro gestor)
+          ('${contractFinanceiroSpId}', '${tenantId}', '${workerEmployee1Id}', '${companyId}', '${estabSpId}', '${deptoFinanceiroId}',
+           '${positionAnalistaId}', 'MAT-004', '2023-01-10', 5000.00, 'ACTIVE', NULL, FALSE),
+          -- Contrato Confidencial da Diretoria
+          ('${contractConfidencialDiretorId}', '${tenantId}', '${workerDiretorId}', '${companyId}', '${estabSpId}', '${deptoLogisticaId}',
+           '${positionDiretorId}', 'DIR-001', '2019-01-01', 35000.00, 'ACTIVE', NULL, TRUE)
+        ON CONFLICT (id) DO UPDATE SET base_salary = EXCLUDED.base_salary;
+      `);
 
       // 9. Configurar Escopos do Supervisor Restrito: Limpar prévios e setar somente Filial SP (ESTABLISHMENT)
       await client.query(

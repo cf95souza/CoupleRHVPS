@@ -121,13 +121,13 @@ describe('Bateria TDD Negativa de Segurança P0 — Gate V2 Oficial', () => {
           ('${replayTestUserId}', 'replay.test.gate2@couplerh.com', '${defaultHash}', 'Replay Tester', '12312312312', TRUE)
         ON CONFLICT (id) DO UPDATE SET is_active = TRUE, password_hash = EXCLUDED.password_hash;
 
-        INSERT INTO public.tenant_users (id, tenant_id, user_id, role, is_active) VALUES
-          ('${tenantUserAdminId}', '${tenantAId}', '${tenantAdminId}', 'tenant_admin', TRUE),
-          ('${tenantUserDpId}', '${tenantAId}', '${dpAnalystId}', 'dp_analyst', TRUE),
-          ('f0000000-0000-0000-0000-000000001400', '${tenantAId}', '${workerAUserId}', 'employee', TRUE),
-          ('f0000000-0000-0000-0000-000000001500', '${tenantAId}', '${workerBUserId}', 'employee', TRUE),
-          ('f0000000-0000-0000-0000-000000001700', '${tenantAId}', '${replayTestUserId}', 'tenant_admin', TRUE)
-        ON CONFLICT (id) DO UPDATE SET role = EXCLUDED.role, is_active = TRUE;
+        INSERT INTO public.tenant_users (id, tenant_id, user_id, role, scope_mode, is_active) VALUES
+          ('${tenantUserAdminId}', '${tenantAId}', '${tenantAdminId}', 'tenant_admin', 'ALL', TRUE),
+          ('${tenantUserDpId}', '${tenantAId}', '${dpAnalystId}', 'dp_analyst', 'ALL', TRUE),
+          ('f0000000-0000-0000-0000-000000001400', '${tenantAId}', '${workerAUserId}', 'employee', 'SELF_ONLY', TRUE),
+          ('f0000000-0000-0000-0000-000000001500', '${tenantAId}', '${workerBUserId}', 'employee', 'SELF_ONLY', TRUE),
+          ('f0000000-0000-0000-0000-000000001700', '${tenantAId}', '${replayTestUserId}', 'tenant_admin', 'ALL', TRUE)
+        ON CONFLICT (id) DO UPDATE SET role = EXCLUDED.role, scope_mode = EXCLUDED.scope_mode, is_active = TRUE;
       `);
 
       // 4. Trabalhadores e Contratos
