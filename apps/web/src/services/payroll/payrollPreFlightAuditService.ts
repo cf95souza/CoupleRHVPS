@@ -628,11 +628,12 @@ export class PayrollPreFlightAuditService {
       }
     }
 
-    // 7. Checar afastamentos ativos
+    // 7. Checar afastamentos ativos (BUG-09: tabela public.leaves filtrada por company_id)
     const leavesData: Record<string, boolean> = {};
     const { data: leavesRaw } = await supabase
-      .from('employee_leaves')
-      .select('contract_id, start_date, end_date')
+      .from('leaves')
+      .select('contract_id, start_date, end_date, contracts!inner(company_id)')
+      .eq('contracts.company_id', period.company_id)
       .lte('start_date', endOfMonth)
       .or(`end_date.is.null,end_date.gte.${startOfMonth}`);
 

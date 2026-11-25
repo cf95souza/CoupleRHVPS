@@ -1,4 +1,4 @@
-import { addMoney } from "../utils/money.js";
+import { addMoney, sumMoney } from "../utils/money.js";
 import {
   EmployerTaxesCalculator,
   LaborConfig,
@@ -10,12 +10,14 @@ export interface ExistingPayslipBase {
   company_id: string;
   base_inss: number;
   base_fgts: number;
+  fgts_month?: number;
 }
 
 export interface CalculatedPayslipForTax {
   contract_id: string;
   base_inss: number;
   base_fgts: number;
+  fgts_month?: number;
 }
 
 export interface CompanyInfo {
@@ -26,22 +28,26 @@ export interface CompanyInfo {
   is_cprb_exempted?: boolean;
 }
 
+export interface AggregatedCompanyTotals {
+  base_inss: number;
+  base_fgts: number;
+  fgts_month_sum?: number;
+}
+
 /**
- * Agrega as bases de INSS e FGTS por empresa a partir de todos os holerites do período (T10).
- * No recálculo de contrato individual, soma os holerites dos outros contratos existentes
- * no banco de dados com o novo holerite recém-calculado.
+ * Agrega as bases de INSS, FGTS e FGTS individual real (2% aprendiz + 8% CLT - BUG-09)
+ * por empresa a partir de todos os holerites do período (T10).
  */
 export function aggregateCompanyBases(params: {
   calculatedPayslips: CalculatedPayslipForTax[];
   existingPayslips?: ExistingPayslipBase[];
   contractCompanyMap: Record<string, string>;
-}): Record<string, { base_inss: number; base_fgts: number }> {
+}): Record<string, AggregatedCompanyTotals> {
   const { calculatedPayslips, existingPayslips = [], contractCompanyMap } = params;
-  const totals: Record<string, { base_inss: number; base_fgts: number }> = {};
+  const totals: Record<string, AggregatedCompanyTotals> = {};
 
   const calculatedContractIds = new Set<string>();
 
-  // 1. Processa holerites calculados nesta execução
   for (const p of calculatedPayslips) {
     calculatedContractIds.add(p.contract_id);
     const companyId = contractCompanyMap[p.contract_id];
@@ -53,12 +59,13 @@ export function aggregateCompanyBases(params: {
 
     totals[companyId].base_inss = addMoney(totals[companyId].base_inss, p.base_inss);
     totals[companyId].base_fgts = addMoney(totals[companyId].base_fgts, p.base_fgts);
+    if (p.fgts_month !== undefined && p.fgts_month !== null) {
+      totals[companyId].fgts_month_sum = addMoney(totals[companyId].fgts_month_sum ?? 0, p.fgts_month);
+    }
   }
 
-  // 2. Processa holerites existentes dos demais contratos do período (não recalculados nesta rodada)
   for (const ep of existingPayslips) {
     if (calculatedContractIds.has(ep.contract_id)) {
-      // Ignora versão antiga do contrato se ele já foi recalculado nesta rodada
       continue;
     }
 
@@ -71,18 +78,22 @@ export function aggregateCompanyBases(params: {
 
     totals[companyId].base_inss = addMoney(totals[companyId].base_inss, ep.base_inss);
     totals[companyId].base_fgts = addMoney(totals[companyId].base_fgts, ep.base_fgts);
+    if (ep.fgts_month !== undefined && ep.fgts_month !== null) {
+      totals[companyId].fgts_month_sum = addMoney(totals[companyId].fgts_month_sum ?? 0, ep.fgts_month);
+    }
   }
 
   return totals;
 }
 
 /**
- * Calcula os tributos patronais consolidados para cada empresa com base nos totais agregados (T10).
+ * Calcula os tributos patronais consolidados para cada empresa com base nos totais agregados (T10 + BUG-09).
+ * Quando fgts_month_sum estiver disponível, utiliza a soma real dos FGTS individuais (2% aprendiz / 8% CLT).
  */
 export function calculateConsolidatedEmployerTaxes(params: {
   tenant_id: string;
   period_id: string;
-  companyTotals: Record<string, { base_inss: number; base_fgts: number }>;
+  companyTotals: Record<string, AggregatedCompanyTotals>;
   companies: CompanyInfo[];
 }): CompanyTaxItem[] {
   const { tenant_id, period_id, companyTotals, companies } = params;
@@ -91,8 +102,7 @@ export function calculateConsolidatedEmployerTaxes(params: {
   for (const companyId of Object.keys(companyTotals)) {
     const totals = companyTotals[companyId];
     const comp = companies.find((c) => c.id === companyId);
-    
-    // Mescla dados das colunas com eventual labor_config em JSON
+
     const laborConfig: LaborConfig = {
       ...comp?.labor_config,
       tax_regime: comp?.tax_regime ?? comp?.labor_config?.tax_regime,
@@ -106,6 +116,18 @@ export function calculateConsolidatedEmployerTaxes(params: {
       laborConfig
     );
 
+    const effectiveFgtsPatronal =
+      totals.fgts_month_sum !== undefined
+        ? totals.fgts_month_sum
+        : taxes.fgts_patronal;
+
+    const effectiveTotal = sumMoney([
+      taxes.inss_patronal,
+      taxes.rat_adjusted,
+      taxes.terceiros,
+      effectiveFgtsPatronal,
+    ]);
+
     result.push({
       tenant_id,
       period_id,
@@ -115,8 +137,8 @@ export function calculateConsolidatedEmployerTaxes(params: {
       inss_patronal: taxes.inss_patronal,
       rat_adjusted: taxes.rat_adjusted,
       terceiros: taxes.terceiros,
-      fgts_patronal: taxes.fgts_patronal,
-      total_taxes: taxes.total,
+      fgts_patronal: effectiveFgtsPatronal,
+      total_taxes: effectiveTotal,
     });
   }
 

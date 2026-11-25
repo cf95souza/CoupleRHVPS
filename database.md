@@ -17285,3 +17285,101 @@ GRANT EXECUTE ON FUNCTION public.mask_bank_agency(TEXT) TO couplerh_app;
 GRANT SELECT ON public.view_contracts_masked TO couplerh_app;
 GRANT SELECT ON public.view_leaves_masked TO couplerh_app;
 ```
+
+---
+
+## 27. Migration `0014_phase_v4_engine_sanitization.sql` & Seeds 2026 (FASE V4)
+
+Aplicada e validada sobre PostgreSQL 17 (`couplerh-db` e `couplerh-test-db`) visando saneamento do motor de cálculo, versionamento completo de holerites/rubricas, política RLS de feriados e persistência transacional atômica:
+
+```sql
+-- 1. Evolução de public.payroll_periods (status estendido, período pai e versão)
+ALTER TABLE public.payroll_periods
+    ADD CONSTRAINT payroll_periods_status_check
+    CHECK (status IN ('DRAFT', 'OPEN', 'CALCULATING', 'CALCULATED', 'CONFERENCE', 'APPROVED', 'CLOSED', 'REOPENED', 'CANCELED'));
+
+ALTER TABLE public.payroll_periods
+    ADD COLUMN IF NOT EXISTS parent_period_id UUID REFERENCES public.payroll_periods(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS current_version INT NOT NULL DEFAULT 1;
+
+-- 2. Parâmetros de Isenção/Redução do IRRF guiados 100% por vigência (BUG-06)
+ALTER TABLE public.general_legal_parameters
+    ADD COLUMN IF NOT EXISTS irrf_exemption_limit NUMERIC(15,2),
+    ADD COLUMN IF NOT EXISTS irrf_reduction_formula_limit NUMERIC(15,2);
+
+ALTER TABLE public.general_legal_parameters
+    ALTER COLUMN irrf_reduction_a DROP NOT NULL,
+    ALTER COLUMN irrf_reduction_b DROP NOT NULL;
+
+-- 3. Versionamento em public.rubrics, public.payslips, public.payslip_items e public.payroll_memory_calc (BUG-09)
+ALTER TABLE public.rubrics
+    ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS valid_from DATE,
+    ADD COLUMN IF NOT EXISTS valid_to DATE,
+    ADD COLUMN IF NOT EXISTS previous_version_id UUID REFERENCES public.rubrics(id) ON DELETE SET NULL;
+
+ALTER TABLE public.payslips
+    ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS legal_version_id UUID REFERENCES public.legal_versions(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS engine_version TEXT NOT NULL DEFAULT '2.2.0';
+
+ALTER TABLE public.payslip_items
+    ADD COLUMN IF NOT EXISTS rubric_version_id UUID REFERENCES public.rubrics(id) ON DELETE SET NULL;
+
+ALTER TABLE public.payroll_memory_calc
+    ADD COLUMN IF NOT EXISTS engine_version TEXT NOT NULL DEFAULT '2.2.0';
+
+-- 4. Eventos Variáveis com override explícito de zero (BUG-04) & IBGE em lotações (BUG-10)
+ALTER TABLE public.payroll_variable_events
+    ADD COLUMN IF NOT EXISTS force_zero_override BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS reference TEXT;
+
+ALTER TABLE public.workplaces
+    ADD COLUMN IF NOT EXISTS state_code VARCHAR(2),
+    ADD COLUMN IF NOT EXISTS city_code VARCHAR(7);
+
+-- 5. Feriados: status, unicidade por tenant/âmbito e políticas RLS (BUG-10)
+ALTER TABLE public.holidays
+    ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'INACTIVE'));
+
+CREATE UNIQUE INDEX idx_holidays_unique_scope
+    ON public.holidays (
+        COALESCE(tenant_id, '00000000-0000-0000-0000-000000000000'::uuid),
+        date,
+        name,
+        COALESCE(state_code, ''),
+        COALESCE(city_code, '')
+    );
+
+CREATE POLICY holidays_select_policy ON public.holidays
+    FOR SELECT USING (tenant_id IS NULL OR tenant_id = public.current_app_tenant_id());
+
+CREATE POLICY holidays_manage_policy ON public.holidays
+    FOR ALL
+    USING (tenant_id = public.current_app_tenant_id())
+    WITH CHECK (tenant_id = public.current_app_tenant_id());
+
+-- 6. Deduções fixas com total_limit (BUG-10) e bases patronais em payroll_company_taxes (BUG-09)
+ALTER TABLE public.employee_deductions
+    ADD COLUMN IF NOT EXISTS rubric_id UUID REFERENCES public.rubrics(id) ON DELETE RESTRICT,
+    ADD COLUMN IF NOT EXISTS total_limit NUMERIC(15,2),
+    ADD COLUMN IF NOT EXISTS start_date DATE,
+    ADD COLUMN IF NOT EXISTS end_date DATE,
+    ADD COLUMN IF NOT EXISTS deduct_on_advance BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS apply_on_types TEXT[];
+
+ALTER TABLE public.payroll_company_taxes
+    ADD COLUMN IF NOT EXISTS total_base_inss NUMERIC(15,2) NOT NULL DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS total_base_fgts NUMERIC(15,2) NOT NULL DEFAULT 0.00;
+
+CREATE UNIQUE INDEX idx_payroll_company_taxes_period_company
+    ON public.payroll_company_taxes (payroll_period_id, company_id)
+    WHERE establishment_id IS NULL;
+
+-- 7. Correção regex AFD ('[^0-9]') & RPC atômica public.save_payroll_period(UUID, JSONB)
+--    (persiste payslips com legal_version_id e incremento de version, payslip_items com rubric_version_id,
+--     payroll_memory_calc e payroll_company_taxes; execução concedida a couplerh_app)
+```
+
+- **Seeds `apps/api/db/seeds/001_system_and_legal_2026.sql`**: atualizados parâmetros 2026 (`irrf_exemption_limit = 5000.00`, `irrf_reduction_formula_limit = 7350.00`), adicionadas rubricas de sistema `250`, `407`, `703`, `704`, `805`, `807` e `850`, preenchidos `factor` e `percentage` nas rubricas padrão e padronizadas as fórmulas em PT-BR (`SALARIO_BASE`, `BASE_HORA_EXTRA`, `BASE_HORA_EXTRA_NOTURNA`, `QUANTIDADE`, `DIAS_INUTEIS`).
+

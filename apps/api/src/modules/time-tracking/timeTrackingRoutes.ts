@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { authenticate } from '../auth/authMiddleware.js';
+import { authenticate, requirePermission } from '../auth/authMiddleware.js';
 import { dbPool } from '../../shared/db/pool.js';
 import { withTenantContext } from '../../shared/db/context.js';
 
@@ -28,7 +28,121 @@ const repIngestSchema = z.object({
   ).min(1, 'Lote deve conter pelo menos uma batida.'),
 });
 
+const integratePayrollSchema = z.object({
+  periodId: z.string().uuid(),
+  year: z.number().int().min(2020).max(2100),
+  month: z.number().int().min(1).max(12),
+  contractId: z.string().uuid().optional(),
+});
+
 export const timeTrackingRoutes: FastifyPluginAsync = async (app) => {
+  // Integração Ponto -> Folha (BUG-04: grava manual_value = NULL para calcular por quantidade)
+  app.post(
+    '/integrate-payroll',
+    { preHandler: [authenticate, requirePermission('manage_time_tracking')] },
+    async (request, reply) => {
+      const parse = integratePayrollSchema.safeParse(request.body);
+      if (!parse.success) {
+        return reply.status(400).send({ success: false, details: parse.error.format() });
+      }
+      if (!request.withContext) {
+        return reply.status(500).send({ success: false, error: 'Contexto não inicializado.' });
+      }
+
+      const { periodId, year, month, contractId } = parse.data;
+      const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+      const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+      try {
+        const summary = await request.withContext(async (client) => {
+          const { rows: rubrics } = await client.query(
+            `SELECT id, code, rubric_kind FROM public.rubrics
+             WHERE (tenant_id = $1::uuid OR is_system = TRUE) AND deleted_at IS NULL;`,
+            [request.user!.tenant_id]
+          );
+          const findRubricId = (codes: string[], kind?: string) => {
+            for (const c of codes) {
+              const found = rubrics.find((r: any) => r.code === c);
+              if (found) return found.id;
+            }
+            if (kind) {
+              const byKind = rubrics.find((r: any) => r.rubric_kind === kind);
+              if (byKind) return byKind.id;
+            }
+            return null;
+          };
+
+          const rHe50 = findRubricId(['102', '150'], 'OVERTIME');
+          const rHe100 = findRubricId(['103', '160']);
+          const rNight = findRubricId(['301'], 'ADIC_NOTURNO');
+          const rAbsence = findRubricId(['801'], 'ABSENCE');
+          const rLate = findRubricId(['803', '802'], 'LATE');
+
+          let sql = `
+            SELECT
+              contract_id,
+              COALESCE(SUM(overtime_50_hours), 0) AS he50,
+              COALESCE(SUM(overtime_100_hours), 0) AS he100,
+              COALESCE(SUM(night_hours), 0) AS night_hours,
+              COALESCE(SUM(CASE WHEN status = 'ABSENCE' THEN 1 ELSE 0 END), 0) AS absence_days,
+              COALESCE(SUM(delay_hours), 0) AS delay_hours
+            FROM public.time_punch_daily_summaries
+            WHERE tenant_id = $1::uuid
+              AND work_date >= $2::date
+              AND work_date <= $3::date
+          `;
+          const queryParams: any[] = [request.user!.tenant_id, startDate, endDate];
+          if (contractId) {
+            sql += ` AND contract_id = $4::uuid`;
+            queryParams.push(contractId);
+          }
+          sql += ` GROUP BY contract_id;`;
+
+          const { rows: summaries } = await client.query(sql, queryParams);
+
+          let inserted = 0;
+          for (const row of summaries) {
+            await client.query(
+              `DELETE FROM public.payroll_variable_events
+               WHERE tenant_id = $1::uuid AND payroll_period_id = $2::uuid
+                 AND contract_id = $3::uuid AND origin = 'TIME_TRACKING';`,
+              [request.user!.tenant_id, periodId, row.contract_id]
+            );
+
+            const toInsert: Array<{ rubricId: string | null; qty: number; ref: string }> = [
+              { rubricId: rHe50, qty: Number(row.he50), ref: `INTEGRAÇÃO_PONTO: HE 50% (${row.he50}h)` },
+              { rubricId: rHe100, qty: Number(row.he100), ref: `INTEGRAÇÃO_PONTO: HE 100% (${row.he100}h)` },
+              { rubricId: rNight, qty: Number(row.night_hours), ref: `INTEGRAÇÃO_PONTO: Adic. Noturno (${row.night_hours}h)` },
+              { rubricId: rAbsence, qty: Number(row.absence_days), ref: `INTEGRAÇÃO_PONTO: Faltas (${row.absence_days}d)` },
+              { rubricId: rLate, qty: Number(row.delay_hours), ref: `INTEGRAÇÃO_PONTO: Atrasos (${row.delay_hours}h)` },
+            ];
+
+            for (const ev of toInsert) {
+              if (ev.rubricId && ev.qty > 0) {
+                await client.query(
+                  `INSERT INTO public.payroll_variable_events (
+                    tenant_id, payroll_period_id, contract_id, rubric_id,
+                    quantity, manual_value, force_zero_override, origin, reference
+                  ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, NULL, FALSE, 'TIME_TRACKING', $6);`,
+                  [request.user!.tenant_id, periodId, row.contract_id, ev.rubricId, ev.qty, ev.ref]
+                );
+                inserted++;
+              }
+            }
+          }
+
+          return { contractsProcessed: summaries.length, eventsInserted: inserted };
+        });
+
+        return reply.send({ success: true, data: summary });
+      } catch (err: any) {
+        request.log.error(err, '[TIME_INTEGRATE_PAYROLL] Erro ao integrar ponto na folha');
+        return reply.status(400).send({ success: false, error: err.message });
+      }
+    }
+  );
+
   // Ponto Mobile Seguro (Portal do Colaborador)
   app.post(
     '/mobile/punch',

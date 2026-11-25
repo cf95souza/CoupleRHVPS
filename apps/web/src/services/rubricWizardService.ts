@@ -1,4 +1,11 @@
-import { round2, RubricFormulaParser, FormulaError } from '@couplerh/payroll-core';
+import {
+  round2,
+  RubricFormulaParser,
+  FormulaError,
+  PUBLISHED_PAYROLL_VARIABLES,
+  normalizeFormulaVariables,
+  normalizeVariableName,
+} from '@couplerh/payroll-core';
 
 export type RubricKind =
   | 'SALARY_BASE'
@@ -94,20 +101,7 @@ export interface ValidationResult {
   warnings: string[];
 }
 
-export const PUBLISHED_VARIABLES = [
-  'SALARY',
-  'MINIMUM_WAGE',
-  'DIVISOR',
-  'FACTOR',
-  'QUANTITY',
-  'BASE_DSR',
-  'BASE_DSR_NOTURNO',
-  'BASE_HORA_EXTRA',
-  'BASE_FERIAS',
-  'BASE_13',
-  'DIAS_UTEIS',
-  'DIAS_INUTEIS',
-] as const;
+export const PUBLISHED_VARIABLES = PUBLISHED_PAYROLL_VARIABLES;
 
 export interface RubricTemplate {
   id: string;
@@ -134,7 +128,7 @@ export const RUBRIC_TEMPLATES: RubricTemplate[] = [
     type: 'EARNING',
     rubric_kind: 'OTHER',
     calculation_form: 'PERCENTUAL',
-    calculation_base: 'SALARY',
+    calculation_base: 'SALARIO_BASE',
     percentage: 20,
     defaultIncidences: {
       inss: true,
@@ -176,7 +170,7 @@ export const RUBRIC_TEMPLATES: RubricTemplate[] = [
     divisor: 220,
     factor: 1.5,
     quantity: 1,
-    formula: '(SALARY / DIVISOR) * FACTOR * QUANTITY',
+    formula: '(SALARIO_BASE / DIVISOR) * FATOR * QUANTIDADE',
     defaultIncidences: {
       inss: true,
       irrf: true,
@@ -214,7 +208,7 @@ export const RUBRIC_TEMPLATES: RubricTemplate[] = [
     type: 'EARNING',
     rubric_kind: 'OTHER',
     calculation_form: 'PERCENTUAL',
-    calculation_base: 'SALARY',
+    calculation_base: 'SALARIO_BASE',
     percentage: 40,
     defaultIncidences: {
       inss: true,
@@ -253,7 +247,7 @@ export const RUBRIC_TEMPLATES: RubricTemplate[] = [
     type: 'DEDUCTION',
     rubric_kind: 'OTHER',
     calculation_form: 'PERCENTUAL',
-    calculation_base: 'SALARY',
+    calculation_base: 'SALARIO_BASE',
     percentage: 6,
     defaultIncidences: {
       inss: false,
@@ -333,7 +327,7 @@ export const RUBRIC_TEMPLATES: RubricTemplate[] = [
     type: 'EARNING',
     rubric_kind: 'OTHER',
     calculation_form: 'FORMULA',
-    formula: '(SALARY * 0.10) + 100',
+    formula: '(SALARIO_BASE * 0.10) + 100',
     defaultIncidences: {
       inss: true,
       irrf: true,
@@ -663,9 +657,9 @@ export function simulateRubricCalculation(
       calculatedAmount = round2(val);
       calculationMemory = `Valor fixo informado: R$ ${calculatedAmount.toFixed(2).replace('.', ',')}`;
     } else if (form === 'PERCENTUAL') {
-      const baseName = config.calculation_base || 'SALARY';
+      const baseName = normalizeVariableName(config.calculation_base || 'SALARIO_BASE');
       let baseValue = employee.salary;
-      if (baseName === 'MINIMUM_WAGE') {
+      if (baseName === 'SALARIO_MINIMO') {
         baseValue = employee.minimum_wage;
       } else if (employee.custom_variables && employee.custom_variables[baseName] !== undefined) {
         baseValue = employee.custom_variables[baseName];
@@ -675,22 +669,31 @@ export function simulateRubricCalculation(
       calculatedAmount = round2((baseValue * perc) / 100);
       calculationMemory = `${perc}% sobre ${baseName} (R$ ${baseValue.toFixed(2).replace('.', ',')}) = R$ ${calculatedAmount.toFixed(2).replace('.', ',')}`;
     } else if (form === 'FORMULA') {
-      const formulaStr = config.formula || '';
+      const formulaStr = normalizeFormulaVariables(config.formula || '');
       if (!formulaStr.trim()) {
         throw new FormulaError('Fórmula não pode estar vazia');
       }
 
-      // Prepara o contexto de variáveis
+      // Prepara o contexto de variáveis unificado em PT-BR (BUG-05)
       const vars: Record<string, number> = {
-        SALARY: employee.salary,
-        MINIMUM_WAGE: employee.minimum_wage,
+        SALARIO_BASE: employee.salary,
+        SALARIO_CONTRATUAL: employee.salary,
+        SALARIO_MINIMO: employee.minimum_wage,
         DIVISOR: config.divisor ?? employee.divisor ?? 220,
-        FACTOR: config.factor ?? employee.factor ?? 1.0,
-        QUANTITY: config.quantity ?? employee.quantity ?? 1.0,
+        FATOR: config.factor ?? employee.factor ?? 1.0,
+        QUANTIDADE: config.quantity ?? employee.quantity ?? 1.0,
+        PERCENTUAL: config.percentage ?? 0,
+        DIAS_TRABALHADOS: 30,
+        HORAS_TRABALHADAS: config.divisor ?? employee.divisor ?? 220,
         DIAS_UTEIS: employee.dias_uteis ?? 24,
         DIAS_INUTEIS: employee.dias_inuteis ?? 4,
+        DEPENDENTES: 0,
         BASE_DSR: employee.custom_variables?.BASE_DSR ?? 0,
+        BASE_DSR_NOTURNO: employee.custom_variables?.BASE_DSR_NOTURNO ?? 0,
         BASE_HORA_EXTRA: employee.custom_variables?.BASE_HORA_EXTRA ?? employee.salary,
+        BASE_HORA_EXTRA_NOTURNA: employee.custom_variables?.BASE_HORA_EXTRA_NOTURNA ?? employee.salary,
+        BASE_FERIAS: employee.custom_variables?.BASE_FERIAS ?? employee.salary,
+        BASE_13: employee.custom_variables?.BASE_13 ?? employee.salary,
         ...(employee.custom_variables || {}),
       };
 

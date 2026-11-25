@@ -316,7 +316,7 @@ export default function () {
         contract_id: selectedContractId,
         rubric_id: selectedRubricId,
         quantity: quantity === "" ? null : quantity,
-        amount: calculatedAmount === "" ? 0 : calculatedAmount,
+        amount: calculatedAmount === "" ? null : calculatedAmount,
         reference: notes
       };
 

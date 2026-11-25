@@ -123,7 +123,7 @@ export default function VacationWizard({ inline = false, preselectedPeriodId, on
           end_date: dateEnd.toISOString().split("T")[0],
           days_taken: actualDaysTaken,
           cash_allowance_days: abono,
-          status: "REQUESTED", // Ou APPROVED_MANAGER se o RH já estiver aprovando direto
+          status: "APPROVED", // Fluxo de aprovação explícito antes do cálculo de férias
         });
 
       if (requestError) throw requestError;
@@ -172,7 +172,7 @@ export default function VacationWizard({ inline = false, preselectedPeriodId, on
               year: fYear,
               type: 'VACATION',
               payment_date: payDate.toISOString().split('T')[0], // 2 dias antes
-              status: 'OPEN'
+              status: 'DRAFT'
             })
             .select('id')
             .single();
@@ -239,7 +239,7 @@ export default function VacationWizard({ inline = false, preselectedPeriodId, on
       }
 
       if (!inline) {
-        toast.error("Férias programadas com sucesso!" + (generateReceipt ? " Recibo gerado com sucesso." : ""));
+        toast.success("Férias programadas com sucesso!" + (generateReceipt ? " Recibo gerado com sucesso." : ""));
         navigate("/ferias");
       }
       if (onSaved) onSaved();

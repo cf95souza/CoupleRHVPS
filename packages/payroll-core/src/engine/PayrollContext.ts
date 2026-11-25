@@ -1,3 +1,5 @@
+import { normalizeVariableName } from '../variablesCatalog.js';
+
 export type RubricKind =
   | 'SALARY_BASE'
   | 'OVERTIME'
@@ -58,6 +60,9 @@ export interface Rubric {
     gera_base_irrf: boolean;
     gera_base_fgts: boolean;
     integra_dsr?: boolean;
+    irrf_mode?: 'NORMAL' | 'EXCLUSIVO' | 'TABELA_PLR' | 'ISENTO';
+    media_ferias?: boolean;
+    media_13?: boolean;
   };
 }
 
@@ -66,7 +71,8 @@ export interface PayrollEvent {
   rubric_id: string;
   quantity?: number;
   reference?: string;
-  manual_value?: number;
+  manual_value?: number | null;
+  force_zero_override?: boolean;
   percentage?: number;
   value_type?: 'AMOUNT' | 'PERCENT';
   origin?: string;
@@ -119,6 +125,7 @@ export interface GeneralLegalParameters {
   dependent_deduction?: number;
   simplified_discount?: number;
   family_salary_quota?: number;
+  family_salary_value?: number;
   family_salary_limit?: number;
   fgts_standard_aliquot?: number;
   fgts_apprentice_aliquot?: number;
@@ -170,6 +177,8 @@ export class PayrollContext {
   is_apprentice: boolean = false;
   // T16: Base de INSS já tributada em outras folhas da mesma competência (férias, complementar, etc.)
   base_inss_already_taxed: number = 0;
+  // BUG-03: Base de FGTS já tributada na 1ª parcela do 13º (para cálculo diferencial exato na 2ª parcela)
+  fgts_base_already_taxed: number = 0;
   // T17: Total de pensão alimentícia judicial apurada (dedutível da base de IRRF)
   total_alimony: number = 0;
   
@@ -206,6 +215,7 @@ export class PayrollContext {
     this.allow_cumulative_hazard_allowances = Boolean(data.allow_cumulative_hazard_allowances);
     this.is_apprentice = Boolean(data.is_apprentice);
     this.base_inss_already_taxed = Number(data.base_inss_already_taxed || 0);
+    this.fgts_base_already_taxed = Number(data.fgts_base_already_taxed || 0);
     this.total_alimony = Number(data.total_alimony || 0);
     this.contract_incidences = data.contract_incidences || null;
     this.inss_parameters = data.inss_parameters || [];
@@ -221,11 +231,31 @@ export class PayrollContext {
       'HORAS_TRABALHADAS': this.divisor,
       'DIAS_UTEIS': this.dias_uteis,
       'DIAS_INUTEIS': this.dias_inuteis,
+      'DIAS_DSR': this.dias_inuteis,
       'DIVISOR': this.divisor,
+      'FATOR': 1,
+      'QUANTIDADE': 0,
+      'PERCENTUAL': 0,
       'DEPENDENTES': data.num_dependentes ?? data.dependentes ?? 0,
       'BASE_DSR': 0,
       'BASE_DSR_NOTURNO': 0,
-      'BASE_HORA_EXTRA': 0,
+      'BASE_HORA_EXTRA': this.salario_base,
+      'BASE_HORA_EXTRA_NOTURNA': this.salario_base,
+      'BASE_FERIAS': this.salario_base,
+      'BASE_13': this.salario_base,
+      // Variáveis auxiliares do catálogo de seeds 2026 (valor 0 quando não há evento específico)
+      'COTA_FAMILIA': Number(this.general_legal_parameters?.family_salary_value ?? this.general_legal_parameters?.family_salary_quota ?? 0),
+      'NUM_DEPENDENTES_SF': 0,
+      'VALOR_VT': 0,
+      'VALOR_FERIAS': 0,
+      'VALOR_ADIANTAMENTO_13': 0,
+      'DIAS_FERIAS': 0,
+      'DIAS_FALTA': 0,
+      'DIAS_DSR_PERDIDOS': 0,
+      'HORAS_ATRASO': 0,
+      'HORAS_EXTRAS_50': 0,
+      'HORAS_EXTRAS_100': 0,
+      'HORAS_NOTURNAS': 0,
     };
 
     // T24: Pré-carregar todas as rubricas do catálogo com valor 0 na variável R{code}
@@ -244,11 +274,16 @@ export class PayrollContext {
     if (name in this.variables) {
       return this.variables[name];
     }
+    const normalized = normalizeVariableName(name);
+    if (normalized in this.variables) {
+      return this.variables[normalized];
+    }
     throw new Error(`Variável ou base de cálculo inexistente no contexto: '${name}'`);
   }
 
   hasVariable(name: string): boolean {
-    return name in this.variables;
+    if (name in this.variables) return true;
+    return normalizeVariableName(name) in this.variables;
   }
 
   addMemory(mem: CalculationMemory) {

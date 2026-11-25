@@ -201,7 +201,7 @@ export default function OffboardingWizard() {
 
         if (contractError) throw contractError;
 
-        toast.error("Rescisão calculada e salva com sucesso!");
+        toast.success("Rescisão calculada e salva com sucesso!");
         navigate("/desligamentos");
       }
     } catch (err: any) {

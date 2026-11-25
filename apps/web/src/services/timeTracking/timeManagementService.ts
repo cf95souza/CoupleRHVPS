@@ -1483,7 +1483,7 @@ export class TimeManagementService {
           contract_id: worker.contract_id,
           rubric_id: rubricByCode['150'].id,
           quantity: effectiveHe50Hours,
-          amount: 0,
+          amount: null,
           reference: isOverflow
             ? `INTEGRAÇÃO_PONTO: HE 50% (Transbordo Teto Banco: ${effectiveHe50Hours}h)`
             : `INTEGRAÇÃO_PONTO: HE 50% (${effectiveHe50Hours}h)`
@@ -1505,7 +1505,7 @@ export class TimeManagementService {
           contract_id: worker.contract_id,
           rubric_id: rubricByCode['160'].id,
           quantity: effectiveHe100Hours,
-          amount: 0,
+          amount: null,
           reference: isOverflow
             ? `INTEGRAÇÃO_PONTO: HE 100% (Transbordo Teto Banco: ${effectiveHe100Hours}h)`
             : `INTEGRAÇÃO_PONTO: HE 100% (${effectiveHe100Hours}h)`
@@ -1526,7 +1526,7 @@ export class TimeManagementService {
           contract_id: worker.contract_id,
           rubric_id: rubricByCode['802'].id,
           quantity: delaysHours,
-          amount: 0,
+          amount: null,
           reference: `INTEGRAÇÃO_PONTO: Atrasos (${delaysHours}h)`
         });
       }
@@ -1539,7 +1539,7 @@ export class TimeManagementService {
           contract_id: worker.contract_id,
           rubric_id: rubricByCode['301'].id,
           quantity: nightHours,
-          amount: 0,
+          amount: null,
           reference: `INTEGRAÇÃO_PONTO: Adic. Noturno (${nightHours}h)`
         });
         totalNightShiftHours += nightHours;
@@ -1553,7 +1553,7 @@ export class TimeManagementService {
           contract_id: worker.contract_id,
           rubric_id: rubricByCode['801'].id,
           quantity: absencesDays,
-          amount: 0,
+          amount: null,
           reference: `INTEGRAÇÃO_PONTO: Faltas (${absencesDays}d)`
         });
       }

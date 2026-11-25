@@ -1,6 +1,7 @@
-// Utilitarios
+// Utilitarios e Catalogo Unico de Variaveis
 export * from './utils/money.js';
 export * from './utils/numberToWordsPtBr.js';
+export * from './variablesCatalog.js';
 
 // Rubricas e Formulas
 export * from './rubrics/DAGResolver.js';
@@ -12,6 +13,7 @@ export * from './engine/PayrollContext.js';
 export * from './engine/PayrollEngine.js';
 export * from './engine/ThirteenthSalaryCalculator.js';
 export * from './engine/VacationOverlapCalculator.js';
+export * from './engine/TerminationCalculator.js';
 export * from './engine/DependentsEligibility.js';
 export * from './engine/DeductionEligibility.js';
 export * from './engine/ContractAdmissionFilter.js';

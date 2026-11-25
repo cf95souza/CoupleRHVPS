@@ -20,6 +20,8 @@ describe('Calculadoras Legais CLT (INSS, IRRF, FGTS)', () => {
     family_salary_value: 62.04,
     fgts_standard_aliquot: 8.0,
     fgts_apprentice_aliquot: 2.0,
+    irrf_exemption_limit: 5000.00,
+    irrf_reduction_formula_limit: 7350.00,
     irrf_reduction_a: 978.62,
     irrf_reduction_b: 0.133145
   };

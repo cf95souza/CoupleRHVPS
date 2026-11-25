@@ -4,8 +4,9 @@ import { RubricFormulaParser } from '../rubrics/RubricFormulaParser.js';
 import { INSSCalculator } from '../legal/INSSCalculator.js';
 import { IRRFCalculator } from '../legal/IRRFCalculator.js';
 import { FGTSCalculator } from '../legal/FGTSCalculator.js';
-import { round2, addMoney, subtractMoney } from '../utils/money.js';
+import { round2, addMoney, subtractMoney, divideMoney } from '../utils/money.js';
 import { calculateReducedNightHours } from '../legal/NightWorkCalculator.js';
+import { normalizeFormulaVariables, normalizeVariableName } from '../variablesCatalog.js';
 
 export class PayrollEngine {
   context: PayrollContext;
@@ -41,17 +42,17 @@ export class PayrollEngine {
             let percIns = insalubridadeRubric.percentage || 20;
             if (evIns.value_type === 'PERCENT' || evIns.percentage !== undefined) {
               percIns = evIns.percentage ?? evIns.manual_value ?? percIns;
-            } else if (evIns.manual_value !== undefined && evIns.manual_value <= 100) {
+            } else if (evIns.manual_value !== undefined && evIns.manual_value !== null && evIns.manual_value <= 100) {
               percIns = evIns.manual_value;
             }
-            const baseIns = this.context.salario_minimo || 1621.0;
+            const baseIns = this.context.salario_minimo;
             const valorIns = evIns.value_type === 'AMOUNT' ? (evIns.manual_value || 0) : round2(baseIns * (percIns / 100));
 
             // Periculosidade estimada
             let percPer = periculosidadeRubric.percentage || 30;
             if (evPer.value_type === 'PERCENT' || evPer.percentage !== undefined) {
               percPer = evPer.percentage ?? evPer.manual_value ?? percPer;
-            } else if (evPer.manual_value !== undefined && evPer.manual_value <= 100) {
+            } else if (evPer.manual_value !== undefined && evPer.manual_value !== null && evPer.manual_value <= 100) {
               percPer = evPer.manual_value;
             }
             const basePer = this.context.salario_base || 0;
@@ -156,25 +157,24 @@ export class PayrollEngine {
                 percentage = percentEvents[0].percentage ?? percentEvents[0].manual_value ?? percentage;
             }
 
-            // Eventos com valor monetário em R$
+            // Eventos com valor monetário em R$ (BUG-04: amount 0/null não bloqueia cálculo por quantidade sem force_zero_override)
             const amountEvents = eventos.filter(ev => {
                 if (ev.value_type === 'PERCENT') return false;
+                if (ev.manual_value === undefined || ev.manual_value === null) return false;
+                if (ev.manual_value === 0) {
+                    return ev.force_zero_override === true;
+                }
                 if (ev.value_type === 'AMOUNT') {
-                    if (isSalaryBase && (!ev.manual_value || ev.manual_value === 0)) return false;
-                    return ev.manual_value !== undefined && ev.manual_value !== null;
+                    return true;
                 }
                 // Sem value_type definido: se rubric for percentual, não trata como AMOUNT se <= 100
                 if (!ev.value_type && (calcForm === 'PERCENTUAL' || isInsalubridade || isPericulosidade || isAlimony)) {
-                    if (ev.manual_value !== undefined && ev.manual_value !== null && ev.manual_value > 0 && ev.manual_value <= 100) {
+                    if (ev.manual_value > 0 && ev.manual_value <= 100) {
                         percentage = ev.manual_value;
                         return false;
                     }
                 }
-                // Para salário base com manual_value 0 (inicialização de dias), não considerar override manual
-                if (isSalaryBase && (!ev.manual_value || ev.manual_value === 0)) {
-                    return false;
-                }
-                return ev.manual_value !== undefined && ev.manual_value !== null;
+                return true;
             });
 
             if (amountEvents.length > 0) {
@@ -188,12 +188,15 @@ export class PayrollEngine {
         if (isSalaryBase) {
             if (!calcBaseName) calcBaseName = 'SALARIO_BASE';
         } else if (isOvertime) {
-            calcForm = 'HORAS';
-            if (!calcBaseName || calcBaseName === 'SALARIO_BASE') calcBaseName = 'BASE_HORA_EXTRA';
             if (!factor && rubric.percentage) {
                 factor = 1 + (rubric.percentage / 100);
             }
-            if (!factor) {
+            if (factor && factor > 0) {
+                calcForm = 'HORAS';
+                if (!calcBaseName || calcBaseName === 'SALARIO_BASE') calcBaseName = 'BASE_HORA_EXTRA';
+            } else if (rubric.formula && rubric.formula.trim() !== '') {
+                calcForm = 'FORMULA';
+            } else {
                 throw new Error(`Fator multiplicador obrigatório não configurado para a rubrica de Hora Extra [${rubric.code || 'S/C'} - ${rubric.name || 'Sem Nome'}].`);
             }
         } else if (isDsrNoturno) {
@@ -234,10 +237,15 @@ export class PayrollEngine {
             if (shouldApplyNightReduction && quantidade > 0) {
                 quantidade = calculateReducedNightHours(quantidade);
             }
-        } else if (rubric.code === '502' || rubric.code === '504') {
-            if (!calcForm) calcForm = 'PERCENTUAL';
-            if (!calcBaseName) calcBaseName = rubric.code === '502' ? 'R501' : 'R503';
-            if (!percentage) percentage = 33.3333; // 1/3
+        } else if (rubric.code === '502' || rubric.code === '504' || rubric.code === '702' || rubric.code === '704') {
+            calcForm = 'UM_TERCO';
+            const targetBaseMap: Record<string, string> = {
+              '502': 'R501',
+              '504': 'R503',
+              '702': 'R701',
+              '704': 'R703',
+            };
+            if (!calcBaseName) calcBaseName = targetBaseMap[rubric.code];
         } else if ((isAbsence || rubric.code === '801' || rubric.code === '210') && rubric.type === 'DEDUCTION') {
             if (!calcForm) calcForm = 'DIAS';
             if (!calcBaseName) calcBaseName = 'SALARIO_BASE';
@@ -252,15 +260,40 @@ export class PayrollEngine {
         
         // Se o valorCalculado ainda não foi definido manualmente, calcula!
         if (!hasManualValue) {
-            if (calcForm === 'FORMULA' && rubric.formula) {
-                const knownCodes = new Set(Array.from(this.context.rubricas.values()).map(r => r.code));
-                const currentParser = new RubricFormulaParser(this.context.variables, knownCodes);
-                valorCalculado = currentParser.evaluate(rubric.formula);
+            if (calcForm === 'UM_TERCO' && calcBaseName) {
+                const baseVal = this.context.getVariable(calcBaseName);
+                valorCalculado = divideMoney(baseVal, 3);
+                formulaUsada = `${calcBaseName} / 3`;
+                if (baseVal > 0 && quantidade === 0) quantidade = 1;
+            } else if (calcForm === 'FORMULA' && rubric.formula) {
+                // Rubricas de fórmula que não são salário base nem DSR nem possuem evento lançado no mês só calculam se houver evento/quantidade
+                const isAutomaticFormulaKind = isSalaryBase || isDsr || isDsrNoturno;
+                if (eventos.length === 0 && !isAutomaticFormulaKind && !rubric.manual_value && !(rubric.quantity && rubric.quantity > 0)) {
+                    valorCalculado = 0;
+                    formulaUsada = 'SEM_EVENTO_NO_PERIODO';
+                } else {
+                    const knownCodes = new Set(Array.from(this.context.rubricas.values()).map(r => r.code));
+                    const effDivisor = divisor || this.context.getVariable('DIVISOR') || 220;
+                    const evalVars: Record<string, number> = {
+                      ...this.context.variables,
+                      DIVISOR: effDivisor,
+                      FATOR: factor ?? 1,
+                      QUANTIDADE: quantidade,
+                      PERCENTUAL: percentage ?? 0,
+                    };
+                    const normalizedFormula = normalizeFormulaVariables(rubric.formula);
+                    const currentParser = new RubricFormulaParser(evalVars, knownCodes);
+                    valorCalculado = currentParser.evaluate(normalizedFormula);
+                    formulaUsada = normalizedFormula;
+                }
             }
             else if ((calcForm === 'HORAS' || calcForm === 'HOURS') && calcBaseName) {
                 if (quantidade > 0) {
-                    const rawBaseVal = this.context.getVariable(calcBaseName);
-                    const baseVal = (calcBaseName === 'BASE_HORA_EXTRA' && rawBaseVal === 0) ? this.context.salario_base : rawBaseVal;
+                    const normBaseName = normalizeVariableName(calcBaseName);
+                    const rawBaseVal = this.context.getVariable(normBaseName);
+                    const baseVal = ((normBaseName === 'BASE_HORA_EXTRA' || normBaseName === 'BASE_HORA_EXTRA_NOTURNA') && rawBaseVal === 0)
+                      ? this.context.salario_base
+                      : rawBaseVal;
                     const effFactor = factor;
                     if (isOvertime && (!effFactor || effFactor <= 0)) {
                         throw new Error(`Fator multiplicador obrigatório não configurado para a rubrica de Hora Extra [${rubric.code || 'S/C'} - ${rubric.name || 'Sem Nome'}].`);
@@ -276,7 +309,8 @@ export class PayrollEngine {
             }
             else if (calcForm === 'PERCENTUAL' || calcForm === 'PERCENTAGE' || calcForm === 'PERCENTAGE_OF_BASE') {
                 if (calcBaseName) {
-                    const baseVal = this.context.getVariable(calcBaseName);
+                    const normBaseName = normalizeVariableName(calcBaseName);
+                    const baseVal = this.context.getVariable(normBaseName);
                     let perc = percentage;
                     
                     if (!perc && (isDsr || isDsrNoturno)) {
@@ -364,22 +398,33 @@ export class PayrollEngine {
                 this.context.total_alimony = addMoney(this.context.total_alimony, valorCalculado);
             }
 
-            // BUG 3 fix: Atualiza Bases Legais — Descontos SUBTRAEM das bases
+            // BUG-06 fix: Atualiza Bases Legais com clamping >= 0 — Descontos SUBTRAEM das bases
             if (rubric.incidencias.gera_base_inss) {
-              this.context.base_inss = round2(this.context.base_inss + (rubric.type === 'DEDUCTION' ? -valorCalculado : valorCalculado));
+              const delta = rubric.type === 'DEDUCTION' ? -valorCalculado : valorCalculado;
+              this.context.base_inss = Math.max(0, round2(this.context.base_inss + delta));
             }
             if (rubric.incidencias.gera_base_irrf) {
-              this.context.base_irrf = round2(this.context.base_irrf + (rubric.type === 'EARNING' ? valorCalculado : -valorCalculado));
+              const delta = rubric.type === 'EARNING' ? valorCalculado : -valorCalculado;
+              this.context.base_irrf = Math.max(0, round2(this.context.base_irrf + delta));
             }
             if (rubric.incidencias.gera_base_fgts) {
-              this.context.base_fgts = round2(this.context.base_fgts + (rubric.type === 'DEDUCTION' ? -valorCalculado : valorCalculado));
+              const delta = rubric.type === 'DEDUCTION' ? -valorCalculado : valorCalculado;
+              this.context.base_fgts = Math.max(0, round2(this.context.base_fgts + delta));
             }
 
-            // Acumula bases dinâmicas (T18 / Doc §4 / Súmula 264 TST)
-            // BASE_HORA_EXTRA inclui salário base e adicionais habituais (insalubridade, periculosidade, noturno, etc.)
-            if (isSalaryBase || isInsalubridade || isPericulosidade || isAdicionalNoturno || rubric.category === 'ALLOWANCE') {
-                const currentBaseHE = this.context.getVariable('BASE_HORA_EXTRA') || 0;
+            // Acumula bases dinâmicas (BUG-07: Súmula 264 TST + OJ 97 SDI-1 TST)
+            // BASE_HORA_EXTRA inicia com salário contratual integral (no PayrollContext) e soma adicionais habituais (SEM noturno).
+            // BASE_HORA_EXTRA_NOTURNA soma adicionais habituais + adicional noturno.
+            if (isInsalubridade || isPericulosidade || (rubric.category === 'ALLOWANCE' && !isAdicionalNoturno)) {
+                const currentBaseHE = this.context.getVariable('BASE_HORA_EXTRA') || this.context.salario_base;
                 this.context.setVariable('BASE_HORA_EXTRA', addMoney(currentBaseHE, valorCalculado));
+
+                const currentBaseHENot = this.context.getVariable('BASE_HORA_EXTRA_NOTURNA') || this.context.salario_base;
+                this.context.setVariable('BASE_HORA_EXTRA_NOTURNA', addMoney(currentBaseHENot, valorCalculado));
+            }
+            if (isAdicionalNoturno) {
+                const currentBaseHENot = this.context.getVariable('BASE_HORA_EXTRA_NOTURNA') || this.context.salario_base;
+                this.context.setVariable('BASE_HORA_EXTRA_NOTURNA', addMoney(currentBaseHENot, valorCalculado));
             }
 
             // BASE_DSR inclui horas extras, comissões e demais variáveis habituais com flag integra_dsr
@@ -392,11 +437,11 @@ export class PayrollEngine {
                 const currentBaseDSRNoturno = this.context.getVariable('BASE_DSR_NOTURNO') || 0;
                 this.context.setVariable('BASE_DSR_NOTURNO', addMoney(currentBaseDSRNoturno, valorCalculado));
 
-                // Se a empresa não possui rubrica específica de DSR_NOTURNO no catálogo, o noturno integra o DSR geral
+                // Se a empresa não possui rubrica específica de DSR_NOTURNO no catálogo, o noturno integra o DSR geral (quando não já somado por integra_dsr)
                 const hasSpecificDsrNoturno = Array.from(this.context.rubricas.values()).some(
-                    r => r.rubric_kind === 'DSR_NOTURNO' || r.code === '171' || (r.name || '').toUpperCase().includes('DSR SOBRE ADICIONAL NOTURNO')
+                    r => r.rubric_kind === 'DSR_NOTURNO' || r.code === '171' || r.code === '402' || (r.name || '').toUpperCase().includes('DSR SOBRE ADICIONAL NOTURNO')
                 );
-                if (!hasSpecificDsrNoturno || integraDsr) {
+                if (!hasSpecificDsrNoturno && !integraDsr) {
                     const currentBaseDSR = this.context.getVariable('BASE_DSR') || 0;
                     this.context.setVariable('BASE_DSR', addMoney(currentBaseDSR, valorCalculado));
                 }
@@ -514,9 +559,10 @@ export class PayrollEngine {
            });
         }
 
-        // FGTS (T19: Suporte a Menor Aprendiz 2% e parâmetros legais)
+        // FGTS (T19 + BUG-03: Suporte a Menor Aprendiz 2% e base diferencial na 2ª parcela do 13º)
+        const effectiveFgtsBase = Math.max(0, subtractMoney(this.context.base_fgts, this.context.fgts_base_already_taxed));
         fgtsResult = FGTSCalculator.calculate(
-          this.context.base_fgts,
+          effectiveFgtsBase,
           this.context.is_apprentice,
           this.context.general_legal_parameters?.fgts_standard_aliquot,
           this.context.general_legal_parameters?.fgts_apprentice_aliquot
@@ -531,10 +577,10 @@ export class PayrollEngine {
             this.context.addMemory({
               rubric_id: rubricFgts.id,
               step_name: 'FGTS',
-              base_value: this.context.base_fgts,
+              base_value: effectiveFgtsBase,
               quantity_used: 1,
               percentage_used: fgtsResult.rate,
-              parsed_formula: `${this.context.base_fgts} * ${(fgtsResult.rate / 100).toFixed(2)}${this.context.is_apprentice ? ' [MENOR APRENDIZ]' : ''}`,
+              parsed_formula: `${effectiveFgtsBase} * ${(fgtsResult.rate / 100).toFixed(2)}${this.context.fgts_base_already_taxed > 0 ? ` (Diferencial 13º: Bruto ${this.context.base_fgts} - 1ª Parc ${this.context.fgts_base_already_taxed})` : ''}${this.context.is_apprentice ? ' [MENOR APRENDIZ]' : ''}`,
               result_value: fgtsResult.value,
               origin: 'AUTOMATICA'
            });

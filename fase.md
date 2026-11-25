@@ -51,8 +51,8 @@ Este documento é o **roteiro oficial de desenvolvimento** da nova versão do **
 | **V0** | Novo Repositório Git Limpo, Monorepo Open-Source & Baseline PostgreSQL 17 Puro | 📗 Blueprint v2.0 §3 (FASE V0) | `[Concluída]` |
 | **V1** | Infraestrutura VPS Oracle Cloud ARM64 (`postgres:17` + Fastify/`pg-boss` + Caddy + Storage HMAC + Backup OCI) | 📗 Blueprint v2.0 §2 e §3 (FASE V1) | `[Concluída]` |
 | **V2** | Autenticação Própria Open-Source (Argon2id/JWT/Cookie/MFA `otplib`), Portal Unificado & Blindagem P0 | 📗 Blueprint v2.0 §3 (FASE V2) | `[Concluída]` |
-| **V3** | Controle de Perfis Real (RBAC Dinâmico + Escopo Filial/Depto/CC/Equipe + Sigilo Salarial) & API REST Modular | 📗 Blueprint v2.0 §3 (FASE V3) | `[Pendente]` |
-| **V4** | Saneamento de Todos os Bugs Críticos do Motor Atual (Férias, 13º, Ponto→Folha, T16, Wizard, Rescisão, Guias) | 📗 Blueprint v2.0 §3 (FASE V4) | `[Pendente]` |
+| **V3** | Controle de Perfis Real (RBAC Dinâmico + Escopo Filial/Depto/CC/Equipe + Sigilo Salarial) & API REST Modular | 📗 Blueprint v2.0 §3 (FASE V3) | `[Concluída]` |
+| **V4** | Saneamento de Todos os Bugs Críticos do Motor Atual (Férias, 13º, Ponto→Folha, T16, Wizard, Rescisão, Guias) | 📗 Blueprint v2.0 §3 (FASE V4) | `[Concluída]` |
 | **V5** | Motor de Folha Enterprise Parte 1 (Worker Lotes/What-If, IRRF Caixa, Pensão Circular ↔ IRRF, Afastamentos, Salário-Família, `indMV`, Estouro `499`/`899`, VT/ANS, CCT) | 📗 Blueprint v2.0 §3 (FASE V5) | `[Pendente]` |
 | **V6** | Motor de Folha Enterprise Parte 2 (Médias CCT, Férias/13º+Jan Completos, Rescisão Unificada + Complementar, Dissídio + RRA, Multi-Regime, Patronais) | 📗 Blueprint v2.0 §3 (FASE V6) | `[Pendente]` |
 | **V7** | Contabilização Enterprise, Rateios Multi-CC/CNO, Provisões Acumuladas com Baixa, CNAB 240+PIX e Informe | 📗 Blueprint v2.0 §3 (FASE V7) | `[Pendente]` |
@@ -123,20 +123,20 @@ Este documento é o **roteiro oficial de desenvolvimento** da nova versão do **
 ---
 
 ## 🔧 FASE V4: Saneamento de Todos os Bugs Críticos do Motor Atual
-**Status:** `[Pendente]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §3 FASE V4
+**Status:** `[Concluída em 25/11/2026]` · **Ref.:** [`DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md`](./DOCUMENTO_ANALISE_ENTERPRISE_VPS_COUPLERH.md) → §3 FASE V4
 
-- [ ] **BUG-01** Corrigir `ReferenceError: fixedEventsByContract` na folha `VACATION` + fluxo do `Vacations/Wizard.tsx` (`status: 'DRAFT'` + aprovação + `toast.success` em Férias e Offboarding)
-- [ ] **BUG-02** Corrigir `TypeError: sumMoney` → `addMoney` na consolidação T16 de INSS
-- [ ] **BUG-03** Incluir rubrica `903` na `THIRTEENTH_1` (fim do erro 422) + corrigir duplo FGTS na `THIRTEENTH_2` (FGTS diferencial exato sem tributar 2x a 1ª parcela)
-- [ ] **BUG-04** Corrigir integração Ponto → Folha e Eventos Variáveis por quantidade (`amount: null` vs `0` no banco e no `PayrollEngine` para não zerar HE, Noturno, Faltas e Atrasos)
-- [ ] **BUG-05** Unificar catálogo de variáveis em `packages/payroll-core/src/variablesCatalog.ts` (PT-BR único entre `PayrollContext`, `rubricWizardService` e API)
-- [ ] **BUG-06** Eliminar hardcodes `5000`/`7350` no `IRRFCalculator` (100% guiado por vigência em `general_legal_parameters`), remover fallbacks `1621.0`, corrigir 1/3 (`33.3333` → `divideMoney(val, 3)`) e clamping `>= 0` nas bases legais
-- [ ] **BUG-07** Remover códigos hardcoded conflitantes (`101`/`150`/`806`) e regex numérica no `DAGResolver`; propagar `integra_dsr`/`irrf_mode`/`media_*`; corrigir `BASE_HORA_EXTRA` (salário integral Súmula 264 TST + separação de `BASE_HORA_EXTRA_NOTURNA`)
-- [ ] **BUG-08** Corrigir bugs imediatos da rescisão (dupla dedução INSS no IRRF, projeção Dez→Jan e > 1 avo, dependentes e datas sem `toISOString()`)
-- [ ] **BUG-09** Corrigir bugs satélites: `fetchPeriodTaxGuides` (selecionar `id` de `payslips` corrigindo guias zeradas), pré-folha (`leaves` + filtro `company_id`), backup (`lgpd_data_sharing_registry`), `Payslips.tsx` (filtro empresa), `save_payroll_period` (`legal_version_id`, `rubric_version_id` e incremento `payslips.version`) e FGTS 2% aprendiz real na agregação patronal
-- [ ] **BUG-10** Filtrar `holidays` por `tenant_id` + âmbito (Nacional/UF/Município IBGE da lotação), respeitar `total_limit` em deduções percentuais e eliminar qualquer truncamento de 1.000 linhas via `pg` direto
+- [x] **BUG-01** Corrigir `ReferenceError: fixedEventsByContract` na folha `VACATION` + fluxo do `Vacations/Wizard.tsx` (`status: 'DRAFT'` + aprovação + `toast.success` em Férias e Offboarding)
+- [x] **BUG-02** Corrigir `TypeError: sumMoney` → `addMoney` na consolidação T16 de INSS (`payrollCalculationService.ts`)
+- [x] **BUG-03** Incluir rubrica `903` na `THIRTEENTH_1` (fim do erro 422) + corrigir duplo FGTS na `THIRTEENTH_2` (`fgts_base_already_taxed` para FGTS diferencial exato sem tributar 2x a 1ª parcela)
+- [x] **BUG-04** Corrigir integração Ponto → Folha e Eventos Variáveis por quantidade (`amount: null` vs `0` no banco, `timeTrackingRoutes.ts` e `PayrollEngine` com `force_zero_override`)
+- [x] **BUG-05** Unificar catálogo de variáveis em `packages/payroll-core/src/variablesCatalog.ts` (`PUBLISHED_PAYROLL_VARIABLES` em PT-BR único entre `PayrollContext`, `rubricWizardService` e API)
+- [x] **BUG-06** Eliminar hardcodes `5000`/`7350` no `IRRFCalculator` (100% guiado por vigência em `general_legal_parameters`), remover fallbacks `1621.0`, corrigir 1/3 (`divideMoney(val, 3)`) e clamping `>= 0` nas bases legais
+- [x] **BUG-07** Remover códigos hardcoded conflitantes (`101`/`150`/`806`) e regex numérica no `DAGResolver`; propagar `integra_dsr`/`irrf_mode`/`media_*`; corrigir `BASE_HORA_EXTRA` (salário integral Súmula 264 TST + separação de `BASE_HORA_EXTRA_NOTURNA`)
+- [x] **BUG-08** Criar `TerminationCalculator` unificado e corrigir bugs imediatos da rescisão (dupla dedução INSS no IRRF, projeção Dez→Jan e > 1 avo, dependentes, aprendiz 2% e datas UTC puras sem `toISOString()`)
+- [x] **BUG-09** Corrigir bugs satélites: `tax-guides` (`id` de `payslips` + FGTS 2% aprendiz real), pré-folha (`leaves` + filtro `company_id`), backup (`lgpd_data_sharing_registry`), `Payslips.tsx` (filtro empresa), `save_payroll_period` (`legal_version_id`, `rubric_version_id` e incremento `payslips.version`) e `CompanyTaxesAggregator`
+- [x] **BUG-10** Filtrar `holidays` por `tenant_id` + âmbito (Nacional/UF/Município IBGE da lotação + política RLS), respeitar `total_limit` em deduções percentuais e eliminar truncamento de 1.000 linhas via `pg` direto
 
-**Gate V4:** Férias, 13º (1ª e 2ª), Ponto→Folha, Consolidação INSS T16, Wizard de Rubricas, Rescisão e Guias Tributárias passando 100% em testes de integração E2E sobre PostgreSQL 17.
+**Gate V4 — APROVADO (25/11/2026):** Férias, 13º (1ª e 2ª), Ponto→Folha, Consolidação INSS T16, Wizard de Rubricas, Rescisão e Guias Tributárias validados em 223 testes automatizados no monorepo e via validação E2E ao vivo dentro do container Docker `couplerh-api` contra PostgreSQL 17 (`couplerh-db`).
 
 ---
 

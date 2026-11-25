@@ -89,7 +89,7 @@ export default function Payslips() {
 
   useEffect(() => {
     fetchPeriods();
-  }, []);
+  }, [selectedCompanyId]);
 
   useEffect(() => {
     if (selectedPeriod) {
@@ -109,16 +109,25 @@ export default function Payslips() {
       .single();
 
     if (tenantData) {
-      const { data, error } = await supabase
+      let query = supabase
         .from("payroll_periods")
-        .select("id, month, year, type, status")
-        .eq("tenant_id", tenantData.tenant_id)
+        .select("id, month, year, type, status, company_id")
+        .eq("tenant_id", tenantData.tenant_id);
+
+      if (selectedCompanyId) {
+        query = query.eq("company_id", selectedCompanyId);
+      }
+
+      const { data, error } = await query
         .order("year", { ascending: false })
         .order("month", { ascending: false });
 
       if (!error && data && data.length > 0) {
         setPeriods(data as PayrollPeriod[]);
         setSelectedPeriod(data[0].id); // Seleciona o mais recente
+      } else {
+        setPeriods([]);
+        setSelectedPeriod("");
       }
     }
     setLoadingPeriods(false);

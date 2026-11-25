@@ -1,11 +1,13 @@
 export interface RawPayslipItem {
   rubric_id: string;
+  rubric_version_id?: string | null;
   reference: string | null;
   amount: number;
   type: string;
 }
 
 export interface RawPayrollMemory {
+  rubric_id?: string | null;
   step_name: string;
   base_value: number;
   quantity_used: number;
@@ -63,6 +65,7 @@ export interface AtomicPayrollPayload {
     base_fgts: number;
     fgts_month: number;
     status: string;
+    legal_version_id: string | null;
     engine_version: string;
     rubrics_version: string;
     rules_version: string;
@@ -72,12 +75,14 @@ export interface AtomicPayrollPayload {
     items: Array<{
       tenant_id: string;
       rubric_id: string;
+      rubric_version_id: string | null;
       reference: string | null;
       amount: number;
       type: string;
     }>;
     memory: Array<{
       tenant_id: string;
+      rubric_id: string | null;
       step_name: string;
       base_value: number;
       quantity_used: number;
@@ -173,12 +178,14 @@ export function buildAtomicPayrollPayload(params: {
       items: (p.items || []).map((it) => ({
         tenant_id,
         rubric_id: it.rubric_id,
+        rubric_version_id: it.rubric_version_id || it.rubric_id,
         reference: it.reference,
         amount: it.amount,
         type: it.type,
       })),
       memory: (p.memory || []).map((m) => ({
         tenant_id,
+        rubric_id: m.rubric_id || null,
         step_name: m.step_name,
         base_value: m.base_value,
         quantity_used: m.quantity_used,
@@ -186,7 +193,7 @@ export function buildAtomicPayrollPayload(params: {
         parsed_formula: m.parsed_formula,
         result_value: m.result_value,
         origin: m.origin || 'AUTOMATICA',
-        engine_version: m.engine_version || '1.0.0',
+        engine_version: m.engine_version || '2.2.0',
       })),
     })),
     company_taxes: (company_taxes || []).map((t) => ({

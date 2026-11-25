@@ -632,10 +632,10 @@ export class PayrollObligationsService {
 
     if (pErr || !period) throw new Error('Período de folha não localizado.');
 
-    // Consulta os holerites do período
+    // Consulta os holerites do período (BUG-09: incluir id)
     const { data: payslips, error: psErr } = await supabase
       .from('payslips')
-      .select('base_inss, base_fgts, base_irrf, total_earnings, total_deductions, net_salary')
+      .select('id, base_inss, base_fgts, base_irrf, total_earnings, total_deductions, net_salary')
       .eq('period_id', periodId);
 
     if (psErr) throw new Error(`Falha ao buscar holerites: ${psErr.message}`);
