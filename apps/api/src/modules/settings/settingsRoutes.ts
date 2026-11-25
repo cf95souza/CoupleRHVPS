@@ -54,17 +54,37 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     if (!request.withContext) return reply.status(500).send({ success: false, error: 'Contexto não inicializado.' });
 
     const params = await request.withContext(async (client) => {
+      const { rows: versions } = await client.query(
+        `SELECT * FROM public.legal_versions
+         WHERE is_active = TRUE
+         ORDER BY valid_from DESC
+         LIMIT 1;`
+      );
+      const version = versions[0] || null;
+      if (!version) {
+        return { version: null, inss: [], irrf: [], general: null };
+      }
+
       const { rows: inss } = await client.query(
-        `SELECT * FROM public.inss_parameters ORDER BY bracket_order ASC;`
+        `SELECT * FROM public.inss_parameters
+         WHERE legal_version_id = $1::uuid
+         ORDER BY bracket_number ASC;`,
+        [version.id]
       );
       const { rows: irrf } = await client.query(
-        `SELECT * FROM public.irrf_parameters ORDER BY bracket_order ASC;`
+        `SELECT * FROM public.irrf_parameters
+         WHERE legal_version_id = $1::uuid
+         ORDER BY bracket_number ASC;`,
+        [version.id]
       );
       const { rows: general } = await client.query(
-        `SELECT * FROM public.general_legal_parameters ORDER BY effective_date DESC LIMIT 1;`
+        `SELECT * FROM public.general_legal_parameters
+         WHERE legal_version_id = $1::uuid
+         LIMIT 1;`,
+        [version.id]
       );
 
-      return { inss, irrf, general: general[0] || null };
+      return { version, inss, irrf, general: general[0] || null };
     });
 
     return reply.send({ success: true, data: params });

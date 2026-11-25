@@ -362,7 +362,7 @@ export class QueryBuilder implements PromiseLike<{ data: any; error: any; count?
 
   delete(): this {
     this.mutationType = 'delete';
-    this.mutationData = data ?? true;
+    this.mutationData = true;
     return this;
   }
 
@@ -457,6 +457,25 @@ export const apiClient = {
     } catch (err: any) {
       return { data: null, error: err };
     }
+  },
+
+  functions: {
+    async invoke(name: string, options?: { body?: any }): Promise<{ data: any; error: any }> {
+      const routeMap: Record<string, string> = {
+        'payroll-engine': '/api/v1/payroll/calculate',
+        'termination-engine': '/api/v1/termination/calculate',
+      };
+      const target = routeMap[name];
+      if (!target) {
+        return { data: null, error: new Error(`Função '${name}' não mapeada na API REST.`) };
+      }
+      try {
+        const res = await apiClient.post<any>(target, options?.body || {});
+        return { data: res?.data ?? res, error: null };
+      } catch (err: any) {
+        return { data: null, error: err };
+      }
+    },
   },
 
   auth: {

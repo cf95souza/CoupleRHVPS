@@ -9,6 +9,7 @@ export const TRUSTED_ORIGINS = [
   'https://app.couplerh.com.br',
   'http://localhost:5173',
   'http://localhost:3000',
+  'http://localhost',
 ];
 
 /**
@@ -17,7 +18,6 @@ export const TRUSTED_ORIGINS = [
 export function isAllowedOrigin(origin: string | null | undefined): boolean {
   if (!origin) return false;
   if (TRUSTED_ORIGINS.includes(origin)) return true;
-  if (origin.endsWith('.vercel.app')) return true;
   return false;
 }
 
@@ -30,7 +30,7 @@ export function getCorsHeaders(origin: string | null | undefined): Record<string
 
   return {
     'Access-Control-Allow-Origin': selectedOrigin,
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Headers': 'authorization, content-type',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
   };
 }

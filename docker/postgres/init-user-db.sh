@@ -7,6 +7,9 @@ set -e
 # ==============================================================================
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+    -- 0. Garantir existência do schema audit antes dos grants
+    CREATE SCHEMA IF NOT EXISTS audit;
+
     -- 1. Criação da Role couplerh_app (não-superuser estrito, RLS obrigatório)
     DO \$\$
     BEGIN
@@ -17,7 +20,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     \$\$;
 
     -- 2. Permissões de Conexão e Schemas
-    GRANT CONNECT ON DATABASE couplerh_prod TO couplerh_app;
+    GRANT CONNECT ON DATABASE "$POSTGRES_DB" TO couplerh_app;
     GRANT USAGE ON SCHEMA public TO couplerh_app;
     GRANT USAGE ON SCHEMA audit TO couplerh_app;
 

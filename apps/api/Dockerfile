@@ -12,11 +12,12 @@ WORKDIR /app
 RUN apk add --no-cache python3 make g++
 
 # Copiar arquivos de configuração do monorepo
-COPY package*.json ./
+COPY package*.json tsconfig.base.json ./
 COPY packages/payroll-core/package*.json ./packages/payroll-core/
 COPY packages/payroll-core/tsconfig*.json ./packages/payroll-core/
 COPY apps/api/package*.json ./apps/api/
 COPY apps/api/tsconfig*.json ./apps/api/
+COPY apps/web/package*.json ./apps/web/
 
 # Instalar todas as dependências (workspaces)
 RUN npm ci
@@ -50,6 +51,7 @@ RUN addgroup -S couplerh -g 1001 && adduser -S couplerh -u 1001 -G couplerh
 COPY package*.json ./
 COPY packages/payroll-core/package*.json ./packages/payroll-core/
 COPY apps/api/package*.json ./apps/api/
+COPY apps/web/package*.json ./apps/web/
 
 # Instalar dependências apenas de produção
 RUN npm ci --omit=dev
