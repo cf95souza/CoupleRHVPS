@@ -120,6 +120,18 @@ export const PAYROLL_VARIABLES_CATALOG: readonly PayrollVariableMetadata[] = [
     description: 'Remuneração base composta para cálculo de 13º salário.',
     defaultValue: 0,
   },
+  {
+    name: 'PISO_SALARIAL_CCT',
+    label: 'Piso Salarial da CCT',
+    description: 'Piso salarial normativo da Convenção Coletiva de Trabalho aplicável ao contrato.',
+    defaultValue: 0,
+  },
+  {
+    name: 'ADICIONAL_TEMPO_SERVICO',
+    label: 'Adicional por Tempo de Serviço (ATS)',
+    description: 'Percentual ou valor de adicional por tempo de serviço (anuênio, triênio, quinquênio).',
+    defaultValue: 0,
+  },
 ] as const;
 
 export const PUBLISHED_PAYROLL_VARIABLES = PAYROLL_VARIABLES_CATALOG.map((v) => v.name);

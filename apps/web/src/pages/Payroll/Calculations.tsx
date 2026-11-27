@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
   Play,
@@ -16,8 +16,9 @@ import {
   Trash2,
   ShieldCheck,
   TrendingUp,
+  SlidersHorizontal,
 } from "lucide-react";
-import { supabase } from "../../lib/apiClient";
+import { supabase, apiClient } from "../../lib/apiClient";
 import { useCompany } from "../../contexts/CompanyContext";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -29,6 +30,7 @@ import { PayrollComparisonModal } from "../../components/payroll/PayrollComparis
 import { PayrollClosureModal } from "../../components/payroll/PayrollClosureModal";
 import { PayrollReopenModal } from "../../components/payroll/PayrollReopenModal";
 import { PayrollObligationsModal } from "../../components/payroll/PayrollObligationsModal";
+import { PayrollWhatIfModal } from "../../components/payroll/PayrollWhatIfModal";
 
 interface PayrollPeriod {
   id: string;
@@ -38,6 +40,8 @@ interface PayrollPeriod {
   type: string;
   status: string;
   processing_date: string;
+  payment_date?: string;
+  irrf_regime?: 'CASH' | 'COMPETENCE';
   current_version?: number;
   closed_at?: string;
 }
@@ -78,6 +82,27 @@ interface MemoryCalcItem {
   engine_version: string;
 }
 
+interface AlimonySplitItem {
+  id: string;
+  beneficiary_name: string;
+  beneficiary_cpf: string | null;
+  court_process_number: string | null;
+  calculation_basis: string;
+  percentage_applied: number | null;
+  base_amount: number;
+  amount: number;
+  irrf_converged: number;
+  solver_iterations: number;
+  payment_method: string;
+  payment_details?: {
+    pix_key_type?: string | null;
+    pix_key?: string | null;
+    bank_code?: string | null;
+    bank_agency?: string | null;
+    bank_account?: string | null;
+  };
+}
+
 export default function () {
   const { selectedCompanyId } = useCompany();
   const [periods, setPeriods] = useState<PayrollPeriod[]>([]);
@@ -92,6 +117,7 @@ export default function () {
   const [memoryData, setMemoryData] = useState<Record<string, MemoryCalcItem[]>>({});
   const [loadingMemory, setLoadingMemory] = useState<Record<string, boolean>>({});
   const [showMemory, setShowMemory] = useState<Record<string, boolean>>({});
+  const [alimonySplits, setAlimonySplits] = useState<Record<string, AlimonySplitItem[]>>({});
 
   // Folha Complementar
   const [showComplementModal, setShowComplementModal] = useState(false);
@@ -106,6 +132,8 @@ export default function () {
   const [newPeriodMonth, setNewPeriodMonth] = useState(currentMonth);
   const [newPeriodYear, setNewPeriodYear] = useState(currentYear);
   const [newPeriodType, setNewPeriodType] = useState("MONTHLY");
+  const [newPeriodPaymentDate, setNewPeriodPaymentDate] = useState("");
+  const [newPeriodIrrfRegime, setNewPeriodIrrfRegime] = useState<"CASH" | "COMPETENCE">("CASH");
 
   // Auditoria de Pré-folha
   const [showAuditModal, setShowAuditModal] = useState(false);
@@ -119,6 +147,25 @@ export default function () {
 
   // Guias, Provisões, Contabilidade e CNAB
   const [showObligationsModal, setShowObligationsModal] = useState(false);
+
+  // Simulador What-If & Progresso de Lotes (FOLHA-01)
+  const [showWhatIfModal, setShowWhatIfModal] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{
+    jobId: string;
+    processed: number;
+    total: number;
+    pct: number;
+  } | null>(null);
+  const pollTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pollTimeoutRef.current !== null) {
+        window.clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
 
 
@@ -148,13 +195,13 @@ export default function () {
           .eq("type", "MONTHLY");
 
         if (!existing || existing.length === 0) {
-          await supabase.from("payroll_periods").upsert({
-            tenant_id: tenantData.tenant_id,
+          await apiClient.post('/api/v1/payroll/periods', {
             company_id: selectedCompanyId,
             month: currentMonth,
             year: currentYear,
-            type: "MONTHLY",
-          }, { onConflict: 'tenant_id, company_id, month, year, type', ignoreDuplicates: true });
+            type: 'MONTHLY',
+            irrf_regime: 'CASH',
+          });
         }
       }
 
@@ -198,44 +245,38 @@ export default function () {
     setLoadingPeriods(false);
   };
 
-    const createCustomPeriod = async () => {
-    const { data: userData } = await supabase.auth.getUser();
-    const { data: tenantData } = await supabase
-      .from("tenant_users")
-      .select("tenant_id")
-      .eq("user_id", userData.user?.id)
-      .single();
-
-    if (tenantData && selectedCompanyId) {
-      await supabase.from("payroll_periods").upsert({
-        tenant_id: tenantData.tenant_id,
+  const createCustomPeriod = async () => {
+    if (!selectedCompanyId) return;
+    try {
+      await apiClient.post('/api/v1/payroll/periods', {
         company_id: selectedCompanyId,
         month: newPeriodMonth,
         year: newPeriodYear,
         type: newPeriodType,
-      }, { onConflict: 'tenant_id, company_id, month, year, type', ignoreDuplicates: true });
+        payment_date: newPeriodPaymentDate || null,
+        irrf_regime: newPeriodIrrfRegime,
+      });
       setShowNewPeriodModal(false);
+      setNewPeriodPaymentDate("");
       fetchPeriods();
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao criar competência.');
     }
   };
 
   const createPeriodByType = async (type: string) => {
-    const { data: userData } = await supabase.auth.getUser();
-    const { data: tenantData } = await supabase
-      .from("tenant_users")
-      .select("tenant_id")
-      .eq("user_id", userData.user?.id)
-      .single();
-
-    if (tenantData && selectedCompanyId) {
-      await supabase.from("payroll_periods").upsert({
-        tenant_id: tenantData.tenant_id,
+    if (!selectedCompanyId) return;
+    try {
+      await apiClient.post('/api/v1/payroll/periods', {
         company_id: selectedCompanyId,
         month: currentMonth,
         year: currentYear,
-        type: type,
-      }, { onConflict: 'tenant_id, company_id, month, year, type', ignoreDuplicates: true });
+        type,
+        irrf_regime: 'CASH',
+      });
       fetchPeriods();
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao gerar competência.');
     }
   };
 
@@ -244,29 +285,40 @@ export default function () {
       toast.error("Selecione a folha origem e preencha a justificativa.");
       return;
     }
-    const { data: userData } = await supabase.auth.getUser();
-    const { data: tenantData } = await supabase
-      .from("tenant_users")
-      .select("tenant_id")
-      .eq("user_id", userData.user?.id)
-      .single();
-
-    if (tenantData && selectedCompanyId) {
-      // Allow multiple complementary periods in the same month by not relying on the composite unique key
-      // or we just use month/year/type and for now we limit to 1 per month of COMPLEMENTARY.
-      await supabase.from("payroll_periods").insert({
-        tenant_id: tenantData.tenant_id,
+    if (!selectedCompanyId) return;
+    try {
+      await apiClient.post('/api/v1/payroll/periods', {
         company_id: selectedCompanyId,
         month: currentMonth,
         year: currentYear,
-        type: "COMPLEMENTARY",
+        type: 'COMPLEMENTARY',
+        irrf_regime: 'CASH',
         parent_period_id: selectedParentPeriodId,
-        complement_reason: complementReason
+        complement_reason: complementReason,
       });
       setShowComplementModal(false);
       setComplementReason("");
       setSelectedParentPeriodId("");
       fetchPeriods();
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao criar folha complementar.');
+    }
+  };
+
+  const updateActivePeriodPaymentDate = async (newDate: string) => {
+    if (!activePeriod || !newDate || activePeriod.status === 'CLOSED') return;
+    try {
+      const res = await apiClient.patch<{ success: boolean; data: PayrollPeriod }>(
+        `/api/v1/payroll/periods/${activePeriod.id}`,
+        { payment_date: newDate }
+      );
+      if (res?.data) {
+        setActivePeriod(res.data);
+        setPeriods((prev) => prev.map((p) => (p.id === res.data.id ? res.data : p)));
+        toast.success('Data de pagamento (Regime de Caixa) atualizada.');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao atualizar data de pagamento.');
     }
   };
 
@@ -357,38 +409,84 @@ export default function () {
   const processPayroll = async () => {
     if (!activePeriod) return;
     setProcessing(true);
+    setBatchProgress({ jobId: '', processed: 0, total: 0, pct: 5 });
 
-    try {
-      // Call our Supabase Edge Function
-      const { data, error } = await supabase.functions.invoke(
-        "payroll-engine",
-        {
-          body: { period_id: activePeriod.id },
-        },
-      );
-
-      if (error) {
-        let errorMsg = error.message;
-        try {
-          if (error.context && typeof error.context.json === 'function') {
-            const body = await error.context.json();
-            if (body?.errors && Array.isArray(body.errors) && body.errors.length > 0) {
-              errorMsg = body.errors.map((e: any) => e.error).join(' | ');
-            } else if (body?.error) {
-              errorMsg = body.error;
-            }
-          }
-        } catch (_) {}
-        throw new Error(errorMsg);
+    const pollBatchJob = async (jobId: string, periodId: string): Promise<void> => {
+      const res = await apiClient.get<{ success: boolean; job: any }>(`/api/v1/payroll/jobs/${jobId}`);
+      const job = res?.job;
+      if (!job) {
+        throw new Error('Job de processamento não encontrado.');
       }
 
-      await fetchPeriods(); // Refresh period to get processing_date
-      await fetchPayslips(activePeriod.id);
+      setBatchProgress({
+        jobId,
+        processed: Number(job.processed_contracts || 0),
+        total: Number(job.total_contracts || 0),
+        pct: Number(job.progress_pct || 0),
+      });
+
+      if (job.status === 'COMPLETED') {
+        setBatchProgress(null);
+        await fetchPeriods();
+        await fetchPayslips(periodId);
+        toast.success(`Folha calculada em lote (${job.processed_contracts || 0} contratos).`);
+        setProcessing(false);
+        return;
+      }
+
+      if (job.status === 'FAILED' || job.status === 'CANCELLED') {
+        setBatchProgress(null);
+        const errMsg =
+          Array.isArray(job.errors_json) && job.errors_json.length > 0
+            ? job.errors_json.map((e: any) => e.error).join(' | ')
+            : 'Falha no processamento em lote da folha.';
+        setProcessing(false);
+        toast.error(`Erro no motor de folha: ${errMsg}`);
+        return;
+      }
+
+      pollTimeoutRef.current = window.setTimeout(() => {
+        pollBatchJob(jobId, periodId).catch((err: any) => {
+          setBatchProgress(null);
+          setProcessing(false);
+          toast.error(`Erro no monitoramento do lote: ${err?.message || 'Falha na consulta'}`);
+        });
+      }, 400);
+    };
+
+    try {
+      const created = await apiClient.post<{ success: boolean; job?: any; error?: string }>(
+        '/api/v1/payroll/jobs',
+        {
+          period_id: activePeriod.id,
+          mode: 'REAL',
+        }
+      );
+
+      if (!created?.success || !created?.job?.id) {
+        throw new Error(created?.error || 'Não foi possível iniciar o processamento em lote.');
+      }
+
+      setBatchProgress({
+        jobId: created.job.id,
+        processed: Number(created.job.processed_contracts || 0),
+        total: Number(created.job.total_contracts || 0),
+        pct: 5,
+      });
+
+      if (created.job.status === 'COMPLETED') {
+        setBatchProgress(null);
+        await fetchPeriods();
+        await fetchPayslips(activePeriod.id);
+        setProcessing(false);
+      } else {
+        await pollBatchJob(created.job.id, activePeriod.id);
+      }
     } catch (err: any) {
       console.error(err);
-      toast.error(`Erro no motor de folha: ${err.message}`);
-    } finally {
+      setBatchProgress(null);
       setProcessing(false);
+      toast.error(`Erro no motor de folha: ${err.message}`);
     }
   };
 
@@ -436,6 +534,18 @@ export default function () {
           setPayslips((prev) =>
             prev.map((p) => (p.id === payslipId ? { ...p, items } : p)),
           );
+        }
+
+        // FOLHA-03: Carregar splits de pensão alimentícia do holerite
+        try {
+          const splitsRes = await apiClient.get<{ success: boolean; splits: AlimonySplitItem[] }>(
+            `/api/v1/payroll/payslips/${payslipId}/alimony-splits`
+          );
+          if (splitsRes?.splits) {
+            setAlimonySplits((prev) => ({ ...prev, [payslipId]: splitsRes.splits }));
+          }
+        } catch {
+          // Silencioso se não houver splits
         }
       } catch (err) {
         console.error("Exceção ao buscar itens do holerite:", err);
@@ -565,6 +675,13 @@ export default function () {
             + 13º (2ª Parc)
           </button>
           <button
+            onClick={async () => createPeriodByType("THIRTEENTH_SINGLE")}
+            className="btn-secondary whitespace-nowrap bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium shadow-sm transition-all"
+            title="Gerar Parcela Única do 13º Salário (até 30/Nov - Lei 4.749/65)"
+          >
+            + 13º (Parc. Única)
+          </button>
+          <button
             onClick={async () => setShowComplementModal(true)}
             className="btn-secondary whitespace-nowrap bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium shadow-sm transition-all"
             title="Gerar Folha Complementar"
@@ -597,7 +714,7 @@ export default function () {
                       {getMonthName(p.month)} / {p.year}
                     </div>
                     <div className="text-xs text-slate-500 flex justify-between mt-1">
-                      <span>{p.type === "MONTHLY" ? "Mensal" : p.type === "ADVANCE" ? "Adiantamento" : p.type === "THIRTEENTH_1" ? "13º (1ª Parc)" : p.type === "THIRTEENTH_2" ? "13º (2ª Parc)" : p.type === "VACATION" ? "Férias" : p.type === "COMPLEMENTARY" ? "Complementar" : p.type}</span>
+                      <span>{p.type === "MONTHLY" ? "Mensal" : p.type === "ADVANCE" ? "Adiantamento" : p.type === "THIRTEENTH_1" ? "13º (1ª Parc)" : p.type === "THIRTEENTH_2" ? "13º (2ª Parc)" : p.type === "THIRTEENTH_SINGLE" ? "13º Parcela Única" : p.type === "THIRTEENTH_COMPLEMENTARY" ? "13º Complementar (Jan)" : p.type === "VACATION" ? "Férias" : p.type === "COMPLEMENTARY" ? "Complementar" : p.type}</span>
                       {p.processing_date ? (
                         <span className="text-emerald-600 flex items-center gap-1">
                           <CheckCircle2 size={12} /> Calculado
@@ -625,10 +742,28 @@ export default function () {
                 </div>
 
                 <div className="relative z-10">
-                  <h2 className="text-2xl font-bold font-display text-slate-900 mb-1">
-                    Folha de {getMonthName(activePeriod.month)}{" "}
-                    {activePeriod.year}
-                  </h2>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-1">
+                    <h2 className="text-2xl font-bold font-display text-slate-900">
+                      Folha de {getMonthName(activePeriod.month)}{" "}
+                      {activePeriod.year}
+                    </h2>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+                        IRRF: {activePeriod.irrf_regime === 'COMPETENCE' ? 'Competência' : 'Regime de Caixa'}
+                      </span>
+                      <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-md px-2.5 py-1">
+                        <span>Pgto:</span>
+                        <input
+                          type="date"
+                          value={(activePeriod.payment_date || '').slice(0, 10)}
+                          disabled={activePeriod.status === 'CLOSED' || processing}
+                          onChange={(e) => updateActivePeriodPaymentDate(e.target.value)}
+                          className="bg-transparent text-slate-900 font-mono text-xs focus:outline-none disabled:opacity-70"
+                          title="Data efetiva de pagamento para apuração do IRRF em Regime de Caixa"
+                        />
+                      </label>
+                    </div>
+                  </div>
                   <p className="text-slate-500 mb-6 max-w-xl">
                     O motor de folha irá varrer todos os colaboradores ativos,
                     ler as regras e incidências das rubricas e processar os
@@ -651,6 +786,17 @@ export default function () {
                         {activePeriod.status === 'CALCULATED' ? "Reprocessar" : "Rodar Motor"}
                       </button>
                     )}
+
+                    {/* Botão Simulador What-If em Lote (FOLHA-01) */}
+                    <button
+                      onClick={() => setShowWhatIfModal(true)}
+                      disabled={processing}
+                      className="flex items-center gap-2 bg-white text-slate-800 border border-slate-300 px-5 py-2.5 rounded-lg font-bold shadow-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
+                      title="Simular reajustes e cenários sem alterar os holerites oficiais"
+                    >
+                      <SlidersHorizontal size={18} className="text-slate-700" />
+                      Simular Cenário (What-If)
+                    </button>
 
                     {/* Botão de Pré-Folha & Críticas (quando calculada, em conferência, fechada ou reaberta) */}
                     {activePeriod && (activePeriod.status === 'CALCULATED' || activePeriod.status === 'CONFERENCE' || activePeriod.status === 'CLOSED' || activePeriod.status === 'REOPENED') && (
@@ -744,13 +890,15 @@ export default function () {
                     {/* Mostrar Status Atual como Badge */}
                     <span className={`text-xs font-bold px-3 py-1.5 rounded-lg uppercase tracking-widest ml-auto
                       ${activePeriod.status === 'DRAFT' || activePeriod.status === 'REOPENED' ? 'bg-slate-100 text-slate-600' : ''}
+                      ${activePeriod.status === 'CALCULATING' ? 'bg-amber-100 text-amber-800' : ''}
                       ${activePeriod.status === 'CALCULATED' ? 'bg-primary-100 text-primary-700' : ''}
                       ${activePeriod.status === 'CONFERENCE' ? 'bg-amber-100 text-amber-700' : ''}
                       ${activePeriod.status === 'CLOSED' ? 'bg-emerald-100 text-emerald-700' : ''}
                       ${activePeriod.status === 'CANCELED' ? 'bg-rose-100 text-rose-700' : ''}
                     `}>
                       STATUS: {
-                        activePeriod.status === 'DRAFT' ? 'Rascunho' : 
+                        activePeriod.status === 'DRAFT' ? 'Rascunho' :
+                        activePeriod.status === 'CALCULATING' ? 'Processando...' :
                         activePeriod.status === 'CALCULATED' ? 'Calculada' : 
                         activePeriod.status === 'CONFERENCE' ? 'Conferência' : 
                         activePeriod.status === 'CLOSED' ? 'Fechada' : 
@@ -769,6 +917,25 @@ export default function () {
                       </span>
                     )}
                   </div>
+
+                  {/* Barra de Progresso em Tempo Real (Lotes de 50 contratos - FOLHA-01) */}
+                  {batchProgress && (
+                    <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-2">
+                      <div className="flex justify-between items-center text-xs font-semibold text-slate-700">
+                        <span className="flex items-center gap-2">
+                          <Loader2 size={14} className="animate-spin text-slate-700" />
+                          Processando lote: {batchProgress.processed} / {batchProgress.total} contratos
+                        </span>
+                        <span>{batchProgress.pct}%</span>
+                      </div>
+                      <div className="h-2.5 w-full rounded-full bg-slate-200 overflow-hidden">
+                        <div
+                          className="h-full bg-slate-900 transition-all duration-150"
+                          style={{ width: `${batchProgress.pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -834,7 +1001,10 @@ export default function () {
                          activePeriod?.type === 'MONTHLY' ? 'Holerite Mensal' :
                          activePeriod?.type === 'THIRTEENTH_1' ? '1ª Parc. 13º' :
                          activePeriod?.type === 'THIRTEENTH_2' ? '2ª Parc. 13º' :
+                         activePeriod?.type === 'THIRTEENTH_SINGLE' ? '13º Parcela Única' :
+                         activePeriod?.type === 'THIRTEENTH_COMPLEMENTARY' ? '13º Complementar (Jan)' :
                          activePeriod?.type === 'VACATION' ? 'Recibo de Férias' : 
+                         activePeriod?.type === 'COMPLEMENTARY' ? 'Folha Complementar' :
                          'Holerite'}        </p>
                             </div>
                           </div>
@@ -969,6 +1139,63 @@ export default function () {
                                   <p className="font-mono font-bold text-emerald-800">{formatCurrency(p.fgts_month || 0)}</p>
                                 </div>
                             </div>
+
+                            {/* FOLHA-03: Rateio de Pensão Alimentícia (Multi-Beneficiário & Solver Circular) */}
+                            {(alimonySplits[p.id]?.length ?? 0) > 0 && (
+                              <div className="mt-4 bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+                                <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                                  <span className="text-xs font-semibold text-slate-800 uppercase tracking-wider">
+                                    Rateio de Pensão Alimentícia (Multi-Beneficiário)
+                                  </span>
+                                  <span className="text-[11px] font-mono text-slate-600">
+                                    Solver: {alimonySplits[p.id][0]?.solver_iterations || 1} iteração(ões) • IRRF Convergido: {formatCurrency(alimonySplits[p.id][0]?.irrf_converged || 0)}
+                                  </span>
+                                </div>
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-left text-xs">
+                                    <thead className="bg-slate-50/70 text-slate-500 uppercase text-[10px]">
+                                      <tr>
+                                        <th className="px-4 py-2">Beneficiário</th>
+                                        <th className="px-4 py-2">Regra / %</th>
+                                        <th className="px-4 py-2 text-right">Base Apurada</th>
+                                        <th className="px-4 py-2">Dados Pagamento</th>
+                                        <th className="px-4 py-2 text-right">Repasse</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                      {alimonySplits[p.id].map((sp) => (
+                                        <tr key={sp.id}>
+                                          <td className="px-4 py-2 font-medium text-slate-800">
+                                            <div>{sp.beneficiary_name}</div>
+                                            <div className="text-[10px] text-slate-500">
+                                              {sp.beneficiary_cpf || 'CPF não inf.'}
+                                              {sp.court_process_number ? ` • Proc. ${sp.court_process_number}` : ''}
+                                            </div>
+                                          </td>
+                                          <td className="px-4 py-2 text-slate-600">
+                                            {sp.calculation_basis}
+                                            {sp.percentage_applied ? ` (${sp.percentage_applied}%)` : ''}
+                                          </td>
+                                          <td className="px-4 py-2 text-right font-mono text-slate-700">
+                                            {formatCurrency(sp.base_amount || 0)}
+                                          </td>
+                                          <td className="px-4 py-2 text-slate-600">
+                                            {sp.payment_method === 'PIX'
+                                              ? `PIX ${sp.payment_details?.pix_key_type || ''}: ${sp.payment_details?.pix_key || '-'}`
+                                              : sp.payment_method === 'JUDICIAL_DEPOSIT'
+                                                ? 'Depósito Judicial'
+                                                : `Banco ${sp.payment_details?.bank_code || '-'} Ag ${sp.payment_details?.bank_agency || '-'} Cc ${sp.payment_details?.bank_account || '-'}`}
+                                          </td>
+                                          <td className="px-4 py-2 text-right font-mono font-bold text-slate-900">
+                                            {formatCurrency(sp.amount || 0)}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            )}
                             
                             {/* Memória de Cálculo Button */}
                             <div className="mt-4 flex justify-end">
@@ -1095,8 +1322,33 @@ export default function () {
                   <option value="ADVANCE">Adiantamento</option>
                   <option value="THIRTEENTH_1">13º Salário (1ª Parcela)</option>
                   <option value="THIRTEENTH_2">13º Salário (2ª Parcela)</option>
+                  <option value="THIRTEENTH_SINGLE">13º Salário (Parcela Única)</option>
+                  <option value="THIRTEENTH_COMPLEMENTARY">13º Salário Complementar (Janeiro)</option>
                   <option value="PROFIT_SHARING">PLR / Bônus</option>
                 </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1">Data de Pagamento</label>
+                  <input
+                    type="date"
+                    value={newPeriodPaymentDate}
+                    onChange={(e) => setNewPeriodPaymentDate(e.target.value)}
+                    className="input-field w-full"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">Vazio = regra da empresa</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1">Regime IRRF</label>
+                  <select
+                    value={newPeriodIrrfRegime}
+                    onChange={(e) => setNewPeriodIrrfRegime(e.target.value as "CASH" | "COMPETENCE")}
+                    className="input-field w-full"
+                  >
+                    <option value="CASH">Regime de Caixa (Lei 7.713)</option>
+                    <option value="COMPETENCE">Competência</option>
+                  </select>
+                </div>
               </div>
             </div>
             <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
@@ -1247,6 +1499,16 @@ export default function () {
         <PayrollObligationsModal
           isOpen={showObligationsModal}
           onClose={() => setShowObligationsModal(false)}
+          periodId={activePeriod.id}
+          periodLabel={`${getMonthName(activePeriod.month)} / ${activePeriod.year}`}
+        />
+      )}
+
+      {/* Modal Simulador What-If em Lote (FOLHA-01) */}
+      {activePeriod && (
+        <PayrollWhatIfModal
+          isOpen={showWhatIfModal}
+          onClose={() => setShowWhatIfModal(false)}
           periodId={activePeriod.id}
           periodLabel={`${getMonthName(activePeriod.month)} / ${activePeriod.year}`}
         />

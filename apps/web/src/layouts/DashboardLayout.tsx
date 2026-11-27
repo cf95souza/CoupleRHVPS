@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  Building2, Users, Settings, LogOut, LayoutDashboard,
+  Building2, Users, UserPlus, Settings, LogOut, LayoutDashboard,
   CalendarDays, FileText, ShieldCheck, UserMinus, Stethoscope,
   Briefcase, Clock, Calculator, Activity, ShieldAlert, TrendingUp,
-  ChevronDown, ChevronUp, ChevronRight, Menu, X, Bell, Check, GitBranch, Landmark, MapPin, Watch, HelpCircle, Inbox
+  ChevronDown, ChevronUp, ChevronRight, Menu, X, Bell, Check, GitBranch, Landmark, MapPin, Watch, HelpCircle, Inbox, Scale,
+  UploadCloud
 } from 'lucide-react';
 import { useCompany } from '../contexts/CompanyContext';
+import { NotificationBell } from '../components/NotificationBell';
 
 const NAV_SECTIONS: Array<{
   label: string;
@@ -34,6 +36,8 @@ const NAV_SECTIONS: Array<{
       { to: '/lotacoes', icon: MapPin, label: 'Lotações / Locais', permission: 'manage_org_structure' },
       { to: '/cargos', icon: Briefcase, label: 'Cargos e CBO', permission: 'manage_org_structure' },
       { to: '/tipos-de-contrato', icon: FileText, label: 'Tipos de Contrato', permission: 'manage_org_structure' },
+      { to: '/sindicatos', icon: Scale, label: 'Sindicatos e CCT', permission: 'manage_unions' },
+      { to: '/admissoes', icon: UserPlus, label: 'Admissão Digital', permission: 'view_employees' },
       { to: '/funcionarios', icon: Users, label: 'Colaboradores', permission: 'view_employees' },
       { to: '/funcionarios/movimentacoes', icon: TrendingUp, label: 'Movimentações', permission: 'view_employees' },
       { to: '/desligamentos', icon: UserMinus, label: 'Desligamentos', permission: 'manage_terminations' },
@@ -44,6 +48,7 @@ const NAV_SECTIONS: Array<{
     items: [
       { to: '/ponto/gestao', icon: Watch, label: 'Gestão de Ponto', permission: 'view_time_tracking' },
       { to: '/ponto/espelho', icon: Clock, label: 'Espelho e Fechamento', permission: 'view_time_tracking' },
+      { to: '/aprovacoes', icon: ShieldCheck, label: 'Aprovações da Equipe', permission: ['approve_team_requests', 'manage_time_tracking', 'manage_vacations'] },
       { to: '/jornadas', icon: CalendarDays, label: 'Jornadas de Trabalho', permission: 'manage_time_tracking' },
       { to: '/feriados', icon: CalendarDays, label: 'Feriados', permission: 'manage_time_tracking' },
     ]
@@ -64,6 +69,7 @@ const NAV_SECTIONS: Array<{
       { to: '/folha/holerites', icon: FileText, label: 'Holerites', permission: 'view_payslips' },
       { to: '/folha/rubricas', icon: Settings, label: 'Rubricas e Regras', permission: 'manage_rubrics' },
       { to: '/folha/relatorios', icon: TrendingUp, label: 'Relatórios Analíticos', permission: 'view_payroll_accounting' },
+      { to: '/contabilidade', icon: Landmark, label: 'Contabilidade & Obrigações', permission: 'view_payroll_accounting' },
     ]
   },
   {
@@ -84,6 +90,7 @@ const NAV_SECTIONS: Array<{
   {
     label: 'Sistema',
     items: [
+      { to: '/implantacao', icon: UploadCloud, label: 'Implantação / Carga', permission: ['manage_settings', 'calculate_payroll'] },
       { to: '/auditoria', icon: ShieldCheck, label: 'Auditoria', permission: 'view_audit_logs' },
       { to: '/configuracoes', icon: Settings, label: 'Configurações Globais', permission: ['manage_settings', 'manage_roles'] },
       { to: '/configuracoes/tabelas-legais', icon: Calculator, label: 'Parâmetros Legais', permission: 'manage_legal_parameters' },
@@ -363,10 +370,7 @@ export default function DashboardLayout() {
               />
             )}
 
-            <button className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors relative cursor-pointer relative z-50">
-              <Bell size={18} />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-primary-500 rounded-full" />
-            </button>
+            <NotificationBell />
             <div className="hidden sm:flex items-center gap-3 pl-3 ml-1 border-l border-slate-200 relative z-50">
               <div className="text-right">
                 <p className="text-sm font-semibold text-slate-800 capitalize">{userName}</p>

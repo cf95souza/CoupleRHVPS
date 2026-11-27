@@ -1,0 +1,3 @@
+﻿cpf_colaborador;matricula;nome_colaborador;data_corte_saldo;saldo_horas_hhmm;saldo_minutos_liquido;regime_horas_extras;observacao
+11122233344;MAT-001;Joao Carlos da Silva;2026-10-31;+14:30;870;BANCO_HORAS;EXEMPLO - Saldo credor de 14h30 (+870 minutos) apurado ate o fechamento do ponto do sistema antigo (apagar antes de importar)
+55566677788;MAT-002;Maria Fernanda Souza;2026-10-31;-04:15;-255;BANCO_HORAS;EXEMPLO - Saldo devedor de -4h15 (-255 minutos) em banco de horas negativo

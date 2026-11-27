@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import {
   payrollObligationsService,
+  type AccountingErpFormat,
   type TaxGuidesReport,
   type PayrollProvisionsReport,
   type AccountingSummaryReport
@@ -45,7 +46,16 @@ export const PayrollObligationsModal: React.FC<PayrollObligationsModalProps> = (
   const [taxGuides, setTaxGuides] = useState<TaxGuidesReport | null>(null);
   const [provisions, setProvisions] = useState<PayrollProvisionsReport | null>(null);
   const [accounting, setAccounting] = useState<AccountingSummaryReport | null>(null);
-  const [cnabData, setCnabData] = useState<{ cnabContent: string; totalEmployees: number; totalAmount: number } | null>(null);
+  const [cnabData, setCnabData] = useState<{
+    cnabContent: string;
+    totalEmployees: number;
+    alimonyCount?: number;
+    totalAmount: number;
+    fileName?: string;
+  } | null>(null);
+  const [selectedBankCode, setSelectedBankCode] = useState('341');
+  const [selectedChannel, setSelectedChannel] = useState<'MIXED' | 'TED_CC' | 'PIX'>('MIXED');
+  const [erpFormat, setErpFormat] = useState<AccountingErpFormat>('DOMINIO');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   useEffect(() => {
@@ -89,6 +99,38 @@ export const PayrollObligationsModal: React.FC<PayrollObligationsModalProps> = (
     setTimeout(() => setCopiedKey(null), 2500);
   };
 
+  const handleRegenerateCnab = async () => {
+    try {
+      const next = await payrollObligationsService.fetchPeriodCnab(periodId, {
+        bankCode: selectedBankCode,
+        paymentChannel: selectedChannel,
+        includeAlimony: true,
+      });
+      setCnabData(next);
+      toast.success(`Remessa CNAB 240 (${selectedBankCode}) gerada no servidor com ${next.totalEmployees} empregado(s) e ${next.alimonyCount || 0} pensionista(s).`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao gerar remessa CNAB 240.');
+    }
+  };
+
+  const handleExportAccounting = async () => {
+    try {
+      const res = await payrollObligationsService.exportAccountingBatch(periodId, erpFormat);
+      const blob = new Blob([res.content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = res.fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success(`Lote ${erpFormat} exportado (${res.fileName}).`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao exportar lote contábil.');
+    }
+  };
+
   const handleDownloadCnab = () => {
     if (!cnabData?.cnabContent) {
       toast.error('Arquivo CNAB não gerado.');
@@ -98,7 +140,7 @@ export const PayrollObligationsModal: React.FC<PayrollObligationsModalProps> = (
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `FOLHA_CNAB240_${periodLabel.replace(/\D/g, '')}.rem`;
+    a.download = cnabData.fileName || `FOLHA_CNAB240_${periodLabel.replace(/\D/g, '')}.rem`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -222,17 +264,48 @@ export const PayrollObligationsModal: React.FC<PayrollObligationsModalProps> = (
                             <span className="font-mono font-medium">{formatCurrency(taxGuides.dctfWebInss.totalInssSegurados)}</span>
                           </div>
                           <div className="flex justify-between text-slate-600">
-                            <span>INSS Patronal (20%):</span>
+                            <span>
+                              INSS Patronal ({taxGuides.dctfWebInss.cprbEffectiveCppRate ?? 20}%):
+                              {(taxGuides.dctfWebInss.cprbReductionRatio ?? 0) > 0 && (
+                                <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold">
+                                  CPRB Mista ({Math.round((taxGuides.dctfWebInss.cprbReductionRatio || 0) * 100)}%)
+                                </span>
+                              )}
+                            </span>
                             <span className="font-mono font-medium">{formatCurrency(taxGuides.dctfWebInss.inssPatronal)}</span>
                           </div>
+                          {(taxGuides.dctfWebInss.inssPatronalProLabore ?? 0) > 0 && (
+                            <div className="flex justify-between text-slate-600">
+                              <span>CPP Pró-Labore / Autônomo (20%):</span>
+                              <span className="font-mono font-medium">{formatCurrency(taxGuides.dctfWebInss.inssPatronalProLabore || 0)}</span>
+                            </div>
+                          )}
                           <div className="flex justify-between text-slate-600">
                             <span>RAT / FAP:</span>
                             <span className="font-mono font-medium">{formatCurrency(taxGuides.dctfWebInss.ratAdjusted)}</span>
                           </div>
+                          {(taxGuides.dctfWebInss.ratSpecialRetirementAmount ?? 0) > 0 && (
+                            <div className="flex justify-between text-amber-700 font-medium">
+                              <span>RAT Adicional (Apos. Especial):</span>
+                              <span className="font-mono">{formatCurrency(taxGuides.dctfWebInss.ratSpecialRetirementAmount || 0)}</span>
+                            </div>
+                          )}
                           <div className="flex justify-between text-slate-600">
                             <span>Terceiros / Outros:</span>
                             <span className="font-mono font-medium">{formatCurrency(taxGuides.dctfWebInss.terceiros)}</span>
                           </div>
+                          {(taxGuides.dctfWebInss.maternityDeduction ?? 0) > 0 && (
+                            <div className="flex justify-between text-emerald-700 font-medium">
+                              <span>(-) Salário-Maternidade (DCTFWeb):</span>
+                              <span className="font-mono">-{formatCurrency(taxGuides.dctfWebInss.maternityDeduction || 0)}</span>
+                            </div>
+                          )}
+                          {(taxGuides.dctfWebInss.familySalaryDeduction ?? 0) > 0 && (
+                            <div className="flex justify-between text-emerald-700 font-medium">
+                              <span>(-) Salário-Família (DCTFWeb):</span>
+                              <span className="font-mono">-{formatCurrency(taxGuides.dctfWebInss.familySalaryDeduction || 0)}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -411,7 +484,7 @@ export const PayrollObligationsModal: React.FC<PayrollObligationsModalProps> = (
                         </p>
                       </div>
                     </div>
-                    <div className="flex gap-4 font-mono text-xs">
+                    <div className="flex flex-wrap items-center gap-4 font-mono text-xs">
                       <div>
                         <span className="block text-[10px] uppercase font-bold text-slate-500">Total Débitos</span>
                         <strong className="text-slate-900">{formatCurrency(accounting.totalDebit)}</strong>
@@ -420,6 +493,23 @@ export const PayrollObligationsModal: React.FC<PayrollObligationsModalProps> = (
                         <span className="block text-[10px] uppercase font-bold text-slate-500">Total Créditos</span>
                         <strong className="text-slate-900">{formatCurrency(accounting.totalCredit)}</strong>
                       </div>
+                      <select
+                        value={erpFormat}
+                        onChange={(e) => setErpFormat(e.target.value as AccountingErpFormat)}
+                        className="px-2.5 py-1.5 text-xs font-sans font-semibold bg-white border border-slate-300 rounded-lg text-slate-800"
+                      >
+                        <option value="DOMINIO">Domínio Sistemas</option>
+                        <option value="ALTERDATA">Alterdata WCont</option>
+                        <option value="PROTHEUS">TOTVS Protheus CT2</option>
+                        <option value="SENIOR">Senior Sapiens</option>
+                        <option value="CSV_CONFIGURABLE">CSV Configurável</option>
+                      </select>
+                      <button
+                        onClick={handleExportAccounting}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-sans font-bold"
+                      >
+                        <Download size={14} /> Exportar ERP
+                      </button>
                     </div>
                   </div>
 
@@ -462,21 +552,51 @@ export const PayrollObligationsModal: React.FC<PayrollObligationsModalProps> = (
               {/* TAB 4: REMESSA CNAB 240 */}
               {activeTab === 'CNAB' && (
                 <div className="space-y-6">
-                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Layout Padrão FEBRABAN CNAB 240</h4>
+                      <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Layout FEBRABAN CNAB 240 Multi-Banco (Seg. A+B / PIX / Pensão)</h4>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        Crédito em Conta Corrente, Salário e Poupança para pagamento em lote de folha de pagamento.
+                        Crédito em Conta, TED, PIX Copia e Cola e repasse judicial automático de pensão alimentícia.
                       </p>
                     </div>
-                    {cnabData && (
-                      <button
-                        onClick={handleDownloadCnab}
-                        className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-xs font-bold shadow-md transition-all"
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        value={selectedBankCode}
+                        onChange={(e) => setSelectedBankCode(e.target.value)}
+                        className="px-2.5 py-2 text-xs font-semibold bg-white border border-slate-300 rounded-xl text-slate-800"
                       >
-                        <Download size={16} /> Baixar Arquivo de Remessa (.REM)
+                        <option value="001">001 - Banco do Brasil</option>
+                        <option value="033">033 - Santander</option>
+                        <option value="104">104 - Caixa Econômica</option>
+                        <option value="237">237 - Bradesco</option>
+                        <option value="341">341 - Itaú</option>
+                        <option value="748">748 - Sicredi</option>
+                        <option value="077">077 - Banco Inter</option>
+                      </select>
+                      <select
+                        value={selectedChannel}
+                        onChange={(e) => setSelectedChannel(e.target.value as any)}
+                        className="px-2.5 py-2 text-xs font-semibold bg-white border border-slate-300 rounded-xl text-slate-800"
+                      >
+                        <option value="MIXED">Canal Misto (CC/TED/PIX)</option>
+                        <option value="TED_CC">Somente CC / TED</option>
+                        <option value="PIX">Priorizar PIX</option>
+                      </select>
+                      <button
+                        onClick={handleRegenerateCnab}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold"
+                      >
+                        Gerar no Servidor
                       </button>
-                    )}
+                      {cnabData && (
+                        <button
+                          onClick={handleDownloadCnab}
+                          className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-xs font-bold shadow-md transition-all"
+                        >
+                          <Download size={16} /> Baixar (.REM)
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {cnabData ? (

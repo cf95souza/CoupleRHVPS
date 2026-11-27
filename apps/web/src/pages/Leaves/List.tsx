@@ -16,9 +16,8 @@ import {
   CalendarDays
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { leaveService } from "../../services/leaveService";
 import { useCompany } from "../../contexts/CompanyContext";
-import { supabase } from "../../lib/apiClient";
+import { apiClient } from "../../lib/apiClient";
 import { formatDate } from "../../lib/dateUtils";
 import { Pagination } from "../../components/Pagination";
 import { toast } from 'sonner';
@@ -26,12 +25,23 @@ import { confirmDialog } from '../../components/ConfirmDialogProvider';
 
 interface Leave {
   id: string;
+  contract_id: string;
+  company_id?: string;
+  worker_name?: string;
   leave_type: string;
+  esocial_reason_code?: string | null;
   start_date: string;
   end_date: string | null;
   status: string;
-  icd_10_code: string | null;
-  employment_contracts: {
+  cid10_code?: string | null;
+  icd_10_code?: string | null;
+  company_paid_days?: number;
+  is_same_cid_relapse?: boolean;
+  is_inss_responsible?: boolean;
+  is_extended_maternity?: boolean;
+  stability_until?: string | null;
+  employment_contracts?: {
+    company_id?: string;
     workers: {
       people: {
         full_name: string;
@@ -62,76 +72,70 @@ export default function () {
   const fetchLeaves = async () => {
     setLoading(true);
     try {
-      const data = await leaveService.getEnrichedLeaves();
-      setLeaves(data || []);
+      const res = await apiClient.get<{ success: boolean; data: Leave[] }>('/api/v1/leaves');
+      setLeaves(res.data || []);
     } catch (error) {
       console.error("Erro ao buscar afastamentos:", error);
+      toast.error("Erro ao carregar afastamentos.");
     } finally {
       setLoading(false);
     }
   };
 
   const handleToggleStatus = async (id: string, currentStatus: string) => {
-    const newStatus = currentStatus === 'APPROVED' ? 'PENDING' : 'APPROVED';
-    const { error } = await supabase
-      .from("leaves")
-      .update({ status: newStatus })
-      .eq("id", id);
-      
-    if (error) {
+    const newStatus = currentStatus === 'ACTIVE' ? 'COMPLETED' : 'ACTIVE';
+    try {
+      await apiClient.put(`/api/v1/leaves/${id}`, { status: newStatus });
+      await fetchLeaves();
+    } catch {
       toast.error("Erro ao alterar status.");
-    } else {
-      setLeaves(leaves.map(l => l.id === id ? { ...l, status: newStatus } : l));
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!await confirmDialog("Deseja realmente excluir este afastamento?")) return;
-    
-    const { error } = await supabase
-      .from("leaves")
-      .delete()
-      .eq("id", id);
-      
-    if (error) {
-      toast.error("Erro ao excluir afastamento.");
-    } else {
-      setLeaves(leaves.filter(l => l.id !== id));
+    if (!await confirmDialog("Deseja realmente cancelar este afastamento?")) return;
+    try {
+      await apiClient.delete(`/api/v1/leaves/${id}`);
+      await fetchLeaves();
+    } catch {
+      toast.error("Erro ao cancelar afastamento.");
     }
   };
 
-  const getLeaveTypeName = async (type: string) => {
+  const getLeaveTypeName = (type: string) => {
     switch (type) {
       case "SICK_LEAVE":
-        return "Atestado Médico (Doença)";
+        return "Auxílio-Doença / Atestado (03)";
       case "MATERNITY":
-        return "Licença Maternidade";
+        return "Licença Maternidade (17)";
       case "PATERNITY":
-        return "Licença Paternidade";
+        return "Licença Paternidade (29)";
       case "WORK_ACCIDENT":
-        return "Acidente de Trabalho";
-      case "UNJUSTIFIED_ABSENCE":
-        return "Falta Injustificada";
+        return "Acidente de Trabalho (01)";
+      case "MILITARY_SERVICE":
+        return "Serviço Militar (19)";
+      case "UNPAID_LEAVE":
+        return "Licença sem Vencimentos (21)";
       case "SUSPENSION":
-        return "Suspensão";
+        return "Suspensão (22)";
       default:
         return "Outros";
     }
   };
 
-  const calculateDays = async (start: string, end: string | null) => {
+  const calculateDays = (start: string, end: string | null) => {
     if (!end) return 1;
     const diffTime = Math.abs(
       new Date(end).getTime() - new Date(start).getTime(),
     );
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays + 1; // Inclusive
+    return diffDays + 1;
   };
 
   const filteredLeaves = leaves.filter((l) => {
-    const contract = l.employment_contracts as any;
-    if (selectedCompanyId && contract?.company_id !== selectedCompanyId) return false;
-    const name = contract?.workers?.people?.full_name || "";
+    const companyId = l.company_id || (l.employment_contracts as any)?.company_id;
+    if (selectedCompanyId && companyId && companyId !== selectedCompanyId) return false;
+    const name = l.worker_name || (l.employment_contracts as any)?.workers?.people?.full_name || "";
     return name.toLowerCase().includes(searchTerm.toLowerCase());
   });
 
@@ -201,8 +205,9 @@ export default function () {
               </thead>
               <tbody className="divide-y divide-slate-200">
                 {paginatedLeaves.map((leave) => {
-                  const name = leave.employment_contracts?.workers?.people?.full_name || "Desconhecido";
+                  const name = leave.worker_name || leave.employment_contracts?.workers?.people?.full_name || "Desconhecido";
                   const days = calculateDays(leave.start_date, leave.end_date);
+                  const cidDisplay = leave.cid10_code ?? leave.icd_10_code;
 
                   return (
                     <tr key={leave.id} className="hover:bg-slate-50/50 transition-colors group">
@@ -221,6 +226,23 @@ export default function () {
                           <Stethoscope size={16} className="text-slate-400" />
                           <span>{getLeaveTypeName(leave.leave_type)}</span>
                         </div>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {leave.is_same_cid_relapse && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
+                              Soma 60d CID
+                            </span>
+                          )}
+                          {leave.is_inss_responsible && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                              INSS 16º+
+                            </span>
+                          )}
+                          {leave.stability_until && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              Estab. até {formatDate(leave.stability_until)}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4">
                         <span className="text-sm font-medium text-slate-700">
@@ -231,22 +253,28 @@ export default function () {
                         </span>
                       </td>
                       <td className="px-6 py-4">
-                        {leave.icd_10_code ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
-                            CID Restrito (Visualizar)
+                        {cidDisplay && cidDisplay !== '***' ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200 font-mono">
+                            {cidDisplay}
                           </span>
                         ) : (
-                          <span className="text-sm text-slate-400">—</span>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-500 border border-slate-200">
+                            {cidDisplay === '***' ? 'Sigilo Médico' : '—'}
+                          </span>
                         )}
                       </td>
                       <td className="px-6 py-4">
-                        {leave.status === "APPROVED" ? (
+                        {leave.status === "ACTIVE" || leave.status === "APPROVED" ? (
                           <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border bg-emerald-50 text-emerald-700 border-emerald-200">
-                            <CheckCircle size={14} className="mr-1" /> Aceito
+                            <CheckCircle size={14} className="mr-1" /> Ativo
+                          </span>
+                        ) : leave.status === "COMPLETED" ? (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border bg-slate-100 text-slate-700 border-slate-200">
+                            Encerrado
                           </span>
                         ) : (
                           <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border bg-amber-50 text-amber-700 border-amber-200">
-                            <FileWarning size={14} className="mr-1" /> Pendente RH
+                            <FileWarning size={14} className="mr-1" /> {leave.status}
                           </span>
                         )}
                       </td>
@@ -262,11 +290,11 @@ export default function () {
                           <button 
                             onClick={async () => handleToggleStatus(leave.id, leave.status)}
                             className={`p-2 rounded-lg transition-colors cursor-pointer ${
-                              leave.status === 'APPROVED' 
+                              leave.status === 'ACTIVE' 
                                 ? 'text-slate-400 hover:text-amber-600 hover:bg-amber-50' 
                                 : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
                             }`}
-                            title={leave.status === 'APPROVED' ? "Mover para Pendente" : "Aprovar"}
+                            title={leave.status === 'ACTIVE' ? "Encerrar Afastamento" : "Reativar"}
                           >
                             <Power size={16} />
                           </button>
@@ -331,7 +359,7 @@ export default function () {
               <div>
                 <p className="text-[10px] uppercase tracking-widest font-bold text-slate-500 mb-1">Colaborador</p>
                 <p className="font-bold text-slate-900 text-lg">
-                  {selectedLeaveView.employment_contracts?.workers?.people?.full_name || "Desconhecido"}
+                  {selectedLeaveView.worker_name || selectedLeaveView.employment_contracts?.workers?.people?.full_name || "Desconhecido"}
                 </p>
               </div>
 
@@ -345,13 +373,13 @@ export default function () {
                 </div>
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
                   <p className="text-[10px] uppercase tracking-widest font-bold text-slate-500 mb-1">Status</p>
-                  {selectedLeaveView.status === "APPROVED" ? (
+                  {selectedLeaveView.status === "ACTIVE" || selectedLeaveView.status === "APPROVED" ? (
                     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800">
-                      <CheckCircle size={12} className="mr-1" /> Aprovado
+                      <CheckCircle size={12} className="mr-1" /> Ativo
                     </span>
                   ) : (
                     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
-                      <FileWarning size={12} className="mr-1" /> Pendente
+                      <FileWarning size={12} className="mr-1" /> {selectedLeaveView.status}
                     </span>
                   )}
                 </div>
@@ -387,7 +415,9 @@ export default function () {
               <div>
                 <p className="text-[10px] uppercase tracking-widest font-bold text-slate-500 mb-1">Código CID (Sigilo Médico)</p>
                 <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 font-mono text-sm text-slate-700">
-                  {selectedLeaveView.icd_10_code ? selectedLeaveView.icd_10_code.toUpperCase() : "Não Informado / Restrito"}
+                  {(selectedLeaveView.cid10_code ?? selectedLeaveView.icd_10_code)
+                    ? String(selectedLeaveView.cid10_code ?? selectedLeaveView.icd_10_code).toUpperCase()
+                    : "Não Informado / Restrito"}
                 </div>
               </div>
             </div>

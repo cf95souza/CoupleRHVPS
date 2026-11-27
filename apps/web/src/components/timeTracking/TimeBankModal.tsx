@@ -2,24 +2,15 @@ import React, { useState, useEffect } from 'react';
 import {
   TrendingUp,
   Clock,
-  Calendar,
-  AlertTriangle,
-  CheckCircle2,
   X,
   Loader2,
   CalendarDays,
-  ShieldCheck,
-  ChevronRight
+  ArrowUpRight,
+  ArrowDownRight,
 } from 'lucide-react';
-import { supabase } from '../../lib/apiClient';
-import {
-  formatMinutesToHours,
-  TimeBankService,
-  type TimeBankAccount,
-  type TimeBankTransaction,
-  type TimeBankStatement
-} from '../../services/timeTracking/timeBankService';
 import { toast } from 'sonner';
+import { formatMinutesToHours } from '../../services/timeTracking/timeBankService';
+import { pontoEnterpriseService } from '../../services/timeTracking/pontoEnterpriseService';
 
 interface TimeBankModalProps {
   isOpen: boolean;
@@ -27,14 +18,11 @@ interface TimeBankModalProps {
   contractId: string;
 }
 
-export const TimeBankModal: React.FC<TimeBankModalProps> = ({
-  isOpen,
-  onClose,
-  contractId
-}) => {
+export const TimeBankModal: React.FC<TimeBankModalProps> = ({ isOpen, onClose, contractId }) => {
   const [loading, setLoading] = useState(true);
-  const [account, setAccount] = useState<TimeBankAccount | null>(null);
-  const [statement, setStatement] = useState<TimeBankStatement | null>(null);
+  const [account, setAccount] = useState<any | null>(null);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [pendingDayOffs, setPendingDayOffs] = useState<any[]>([]);
   const [showRequestOffModal, setShowRequestOffModal] = useState(false);
   const [offDate, setOffDate] = useState('');
   const [offHours, setOffHours] = useState('8');
@@ -49,41 +37,12 @@ export const TimeBankModal: React.FC<TimeBankModalProps> = ({
   const fetchTimeBankData = async () => {
     setLoading(true);
     try {
-      // 1. Buscar conta ativa de banco de horas
-      const { data: accountData, error: accError } = await supabase
-        .from('time_bank_accounts')
-        .select('*')
-        .eq('contract_id', contractId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (accError) throw accError;
-
-      if (!accountData) {
-        setAccount(null);
-        setStatement(null);
-        return;
-      }
-
-      setAccount(accountData as TimeBankAccount);
-
-      // 2. Buscar transações da conta
-      const { data: txData, error: txError } = await supabase
-        .from('time_bank_transactions')
-        .select('*')
-        .eq('account_id', accountData.id)
-        .order('date', { ascending: true })
-        .order('created_at', { ascending: true });
-
-      if (txError) throw txError;
-
-      const transactions = (txData || []) as TimeBankTransaction[];
-      const stmt = TimeBankService.generateStatement(accountData as TimeBankAccount, transactions);
-      setStatement(stmt);
+      const res = await pontoEnterpriseService.fetchPortalTimeBank();
+      setAccount(res.account || null);
+      setTransactions(res.transactions || []);
+      setPendingDayOffs(res.pendingDayOffs || []);
     } catch (err: any) {
-      console.error(err);
-      toast.error('Erro ao carregar banco de horas: ' + (err.message || 'Desconhecido'));
+      toast.error(err?.message || 'Erro ao carregar banco de horas.');
     } finally {
       setLoading(false);
     }
@@ -91,14 +50,11 @@ export const TimeBankModal: React.FC<TimeBankModalProps> = ({
 
   const handleRequestCompDayOff = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!account) return;
-
     const minutes = Math.round(parseFloat(offHours) * 60);
     if (!minutes || minutes <= 0) {
-      toast.error('Informe uma quantidade válida de horas para a folga.');
+      toast.error('Informe uma quantidade válida de horas.');
       return;
     }
-
     if (!offDate) {
       toast.error('Selecione a data da folga compensatória.');
       return;
@@ -106,33 +62,18 @@ export const TimeBankModal: React.FC<TimeBankModalProps> = ({
 
     setSubmittingOff(true);
     try {
-      // Insere transação de COMPENSATION_DAY_OFF
-      const { error: txError } = await supabase.from('time_bank_transactions').insert({
-        tenant_id: account.tenant_id,
-        account_id: account.id,
-        date: offDate,
-        minutes: -minutes,
-        transaction_type: 'COMPENSATION_DAY_OFF',
-        description: offDescription.trim() || `Folga compensatória agendada (${offHours}h)`
+      await pontoEnterpriseService.requestPortalDayOff({
+        workDate: offDate,
+        requestedMinutes: minutes,
+        justification: offDescription.trim() || `Folga compensatória solicitada (${offHours}h)`,
       });
-
-      if (txError) throw txError;
-
-      // Atualiza saldo da conta
-      const newBalance = account.balance_minutes - minutes;
-      await supabase
-        .from('time_bank_accounts')
-        .update({ balance_minutes: newBalance, updated_at: new Date().toISOString() })
-        .eq('id', account.id);
-
-      toast.success('Folga compensatória agendada com sucesso!');
+      toast.success('Solicitação enviada ao Gestor e DP! O saldo só é debitado após homologação.');
       setShowRequestOffModal(false);
       setOffDate('');
       setOffDescription('');
-      fetchTimeBankData();
+      await fetchTimeBankData();
     } catch (err: any) {
-      console.error(err);
-      toast.error('Erro ao solicitar folga: ' + (err.message || 'Desconhecido'));
+      toast.error(err?.message || 'Erro ao solicitar folga.');
     } finally {
       setSubmittingOff(false);
     }
@@ -140,239 +81,142 @@ export const TimeBankModal: React.FC<TimeBankModalProps> = ({
 
   if (!isOpen) return null;
 
-  const alert = account
-    ? TimeBankService.checkExpirationAndAlerts(account, new Date().toISOString().substring(0, 10))
-    : null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden animate-scale-up">
-        {/* Header */}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+      <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden">
         <div className="bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-5 text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center">
+            <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center">
               <TrendingUp size={22} className="text-white" />
             </div>
             <div>
-              <h2 className="text-lg font-bold font-display leading-tight">Banco de Horas</h2>
-              <p className="text-xs text-white/80 font-medium">Extrato e Gestão de Compensação</p>
+              <h2 className="text-lg font-bold leading-tight">Banco de Horas</h2>
+              <p className="text-xs text-white/80">Extrato Oficial e Solicitação de Folga</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
-          >
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center">
             <X size={18} />
           </button>
         </div>
 
-        {/* Content */}
-        <div className="p-6 overflow-y-auto space-y-6 flex-1">
+        <div className="p-6 overflow-y-auto space-y-5 flex-1">
           {loading ? (
-            <div className="py-12 flex flex-col items-center justify-center text-slate-400 gap-3">
-              <Loader2 size={32} className="animate-spin text-emerald-500" />
-              <p className="text-sm font-medium">Carregando movimentações do banco de horas...</p>
+            <div className="py-12 flex flex-col items-center text-slate-400 gap-2">
+              <Loader2 size={28} className="animate-spin text-emerald-500" />
+              <p className="text-xs">Consultando banco de horas autenticado...</p>
             </div>
           ) : !account ? (
-            <div className="text-center py-10 space-y-3">
-              <Clock size={40} className="mx-auto text-slate-300" />
-              <p className="text-base font-bold text-slate-700">Nenhum banco de horas ativo</p>
-              <p className="text-xs text-slate-400 max-w-xs mx-auto">
-                Não há acordo de banco de horas cadastrado para o seu contrato de trabalho no momento.
-              </p>
+            <div className="text-center py-8 text-slate-500 text-sm">
+              <Clock size={36} className="mx-auto text-slate-300 mb-2" />
+              Nenhuma conta de banco de horas encontrada para o contrato.
             </div>
           ) : (
             <>
-              {/* Saldo em Destaque */}
               <div
-                className={`p-6 rounded-3xl border ${
-                  account.balance_minutes >= 0
-                    ? 'bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-200'
-                    : 'bg-gradient-to-br from-rose-50 to-orange-50 border-rose-200'
+                className={`p-5 rounded-2xl border ${
+                  Number(account.balance_minutes || 0) >= 0
+                    ? 'bg-emerald-50 border-emerald-200'
+                    : 'bg-rose-50 border-rose-200'
                 }`}
               >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                    Saldo Acumulado Atual
-                  </span>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Saldo Atual</span>
+                <div className="flex items-center justify-between mt-1">
                   <span
-                    className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
-                      account.policy_type === 'ACORDO_INDIVIDUAL'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : 'bg-indigo-100 text-indigo-800'
+                    className={`text-4xl font-black font-mono ${
+                      Number(account.balance_minutes || 0) >= 0 ? 'text-emerald-700' : 'text-rose-700'
                     }`}
                   >
-                    {account.policy_type === 'ACORDO_INDIVIDUAL' ? 'Acordo Individual (6m)' : 'CCT (12m)'}
+                    {formatMinutesToHours(Number(account.balance_minutes || 0))}
                   </span>
-                </div>
-
-                <div className="flex items-baseline justify-between">
-                  <div
-                    className={`text-4xl sm:text-5xl font-black font-mono tracking-tight ${
-                      account.balance_minutes >= 0 ? 'text-emerald-700' : 'text-rose-700'
-                    }`}
-                  >
-                    {formatMinutesToHours(account.balance_minutes)}
-                  </div>
-
                   <button
-                    onClick={() => setShowRequestOffModal(true)}
-                    className="py-2 px-3.5 rounded-xl bg-white text-emerald-700 border border-emerald-300 font-bold text-xs shadow-sm hover:bg-emerald-50 transition-all flex items-center gap-1.5"
+                    onClick={() => setShowRequestOffModal(!showRequestOffModal)}
+                    className="py-2 px-3 rounded-xl bg-white text-emerald-700 border border-emerald-300 font-bold text-xs flex items-center gap-1.5"
                   >
-                    <CalendarDays size={14} />
-                    <span>Agendar Folga</span>
+                    <CalendarDays size={14} /> Solicitar Folga
                   </button>
                 </div>
-
-                <p className="text-xs text-slate-500 mt-3 flex items-center gap-1.5">
-                  <Calendar size={13} className="text-slate-400" />
-                  Vigência: {account.start_date} até {account.end_date}
-                </p>
               </div>
 
-              {/* Alerta de Vencimento */}
-              {alert && alert.status !== 'NORMAL' && (
-                <div
-                  className={`p-4 rounded-2xl border flex items-start gap-3 ${
-                    alert.status === 'CRITICAL' || alert.status === 'EXPIRED'
-                      ? 'bg-rose-50 border-rose-200 text-rose-800'
-                      : 'bg-amber-50 border-amber-200 text-amber-800'
-                  }`}
-                >
-                  <AlertTriangle size={18} className="shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-xs font-bold">
-                      {alert.status === 'EXPIRED' ? 'Banco de Horas Vencido' : 'Aviso de Vencimento do Acordo'}
-                    </p>
-                    <p className="text-xs mt-0.5 opacity-90">{alert.message}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Formulário de Folga Compensatória (Expansível) */}
               {showRequestOffModal && (
-                <form
-                  onSubmit={handleRequestCompDayOff}
-                  className="p-4 bg-slate-50 border border-emerald-200 rounded-2xl space-y-3 animate-fade-in"
-                >
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-bold text-slate-800 uppercase tracking-wide">
-                      Agendar Folga Compensatória
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => setShowRequestOffModal(false)}
-                      className="text-slate-400 hover:text-slate-600"
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-
+                <form onSubmit={handleRequestCompDayOff} className="p-4 bg-slate-50 border border-emerald-200 rounded-2xl space-y-3">
+                  <p className="text-xs font-bold text-slate-800">Solicitar Folga Compensatória (Aprovação Gestor &rarr; DP)</p>
                   <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[11px] font-semibold text-slate-600 block mb-1">Data da Folga</label>
-                      <input
-                        type="date"
-                        required
-                        className="w-full text-xs py-2 px-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                        value={offDate}
-                        onChange={(e) => setOffDate(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-semibold text-slate-600 block mb-1">Horas a Debitar</label>
-                      <input
-                        type="number"
-                        step="0.5"
-                        min="1"
-                        max="10"
-                        required
-                        className="w-full text-xs py-2 px-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                        value={offHours}
-                        onChange={(e) => setOffHours(e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] font-semibold text-slate-600 block mb-1">Motivo / Observação</label>
                     <input
-                      type="text"
-                      placeholder="Ex: Compensação de feriado ou ponte..."
-                      className="w-full text-xs py-2 px-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                      value={offDescription}
-                      onChange={(e) => setOffDescription(e.target.value)}
+                      type="date"
+                      value={offDate}
+                      onChange={(e) => setOffDate(e.target.value)}
+                      required
+                      className="px-3 py-2 rounded-xl border text-xs bg-white"
+                    />
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="1"
+                      max="12"
+                      value={offHours}
+                      onChange={(e) => setOffHours(e.target.value)}
+                      className="px-3 py-2 rounded-xl border text-xs bg-white"
+                      placeholder="Horas (ex: 8)"
                     />
                   </div>
-
-                  <div className="flex justify-end gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setShowRequestOffModal(false)}
-                      className="py-1.5 px-3 rounded-xl border border-slate-200 text-xs text-slate-600 font-semibold"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={submittingOff}
-                      className="py-1.5 px-4 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 flex items-center gap-1.5"
-                    >
-                      {submittingOff ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                      <span>Confirmar Folga</span>
-                    </button>
-                  </div>
+                  <input
+                    type="text"
+                    value={offDescription}
+                    onChange={(e) => setOffDescription(e.target.value)}
+                    placeholder="Motivo / observação"
+                    className="w-full px-3 py-2 rounded-xl border text-xs bg-white"
+                  />
+                  <button
+                    type="submit"
+                    disabled={submittingOff}
+                    className="w-full py-2 rounded-xl bg-emerald-600 text-white font-bold text-xs"
+                  >
+                    {submittingOff ? 'Enviando...' : 'Enviar para Aprovação'}
+                  </button>
                 </form>
               )}
 
-              {/* Extrato de Transações */}
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
-                  Extrato de Movimentações
-                </p>
+              {pendingDayOffs.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-xs font-bold text-slate-500 uppercase">Solicitações de Folga</h4>
+                  {pendingDayOffs.map((req) => (
+                    <div key={req.id} className="p-3 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
+                      <div>
+                        <p className="font-semibold text-slate-800">
+                          {new Date(String(req.work_date).slice(0, 10) + 'T12:00:00').toLocaleDateString('pt-BR')} ·{' '}
+                          {req.requested_minutes} min
+                        </p>
+                        <p className="text-slate-500">{req.justification}</p>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold">{req.status}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
-                {statement && statement.entries.length > 0 ? (
-                  <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                    {statement.entries.map((entry, idx) => (
-                      <div
-                        key={idx}
-                        className="p-3 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-between text-xs"
-                      >
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold text-slate-500 uppercase">Histórico de Movimentações</h4>
+                {transactions.length === 0 ? (
+                  <p className="text-xs text-slate-400">Nenhuma movimentação registrada.</p>
+                ) : (
+                  transactions.map((tx) => (
+                    <div key={tx.id} className="p-3 rounded-xl bg-slate-50 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        {tx.minutes >= 0 ? (
+                          <ArrowUpRight size={15} className="text-emerald-600" />
+                        ) : (
+                          <ArrowDownRight size={15} className="text-rose-600" />
+                        )}
                         <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-800">{entry.date}</span>
-                            <span
-                              className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${
-                                entry.minutes > 0
-                                  ? 'bg-emerald-100 text-emerald-800'
-                                  : 'bg-rose-100 text-rose-800'
-                              }`}
-                            >
-                              {entry.transaction_type}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-slate-500 mt-0.5 truncate max-w-xs">{entry.description}</p>
-                        </div>
-
-                        <div className="text-right">
-                          <p
-                            className={`font-mono font-bold ${
-                              entry.minutes > 0 ? 'text-emerald-600' : 'text-rose-600'
-                            }`}
-                          >
-                            {entry.minutes_formatted}
-                          </p>
-                          <p className="text-[10px] text-slate-400 font-mono">
-                            Saldo: {entry.running_balance_formatted}
-                          </p>
+                          <p className="font-semibold text-slate-800">{tx.description || tx.transaction_type}</p>
+                          <p className="text-slate-400">{String(tx.reference_date).slice(0, 10)}</p>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-400 text-center py-4 bg-slate-50 rounded-xl border border-slate-100">
-                    Nenhuma movimentação registrada no período deste banco de horas.
-                  </p>
+                      <span className={`font-mono font-bold ${tx.minutes >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        {formatMinutesToHours(tx.minutes)}
+                      </span>
+                    </div>
+                  ))
                 )}
               </div>
             </>

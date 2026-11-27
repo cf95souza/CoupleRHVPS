@@ -219,6 +219,55 @@ export const orgRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({ success: true, data: result });
   });
 
+  app.post('/contract-types', { preHandler: [authenticate, requirePermission('manage_organization')] }, async (request, reply) => {
+    const schema = z.object({
+      code: z.string().min(1).max(30),
+      name: z.string().min(2).max(120),
+      is_clt: z.boolean().default(true),
+      esocial_category_code: z.string().min(2).max(10).default('101'),
+      calculation_regime: z
+        .enum(['CLT', 'PRO_LABORE', 'AUTONOMOUS_RPA', 'INTERN', 'INTERMITTENT', 'HOURLY', 'DAILY', 'COMMISSION_ONLY', 'APPRENTICE'])
+        .default('CLT'),
+      has_inss: z.boolean().default(true),
+      has_fgts: z.boolean().default(true),
+      has_13th: z.boolean().default(true),
+      has_vacation: z.boolean().default(true),
+      has_employer_rat: z.boolean().default(true),
+      has_employer_third_parties: z.boolean().default(true),
+    });
+    const parse = schema.safeParse(request.body || {});
+    if (!parse.success) return reply.status(400).send({ success: false, details: parse.error.format() });
+    if (!request.withContext) return reply.status(500).send({ success: false, error: 'Contexto não inicializado.' });
+    const d = parse.data;
+    const created = await request.withContext(async (client) => {
+      const { rows } = await client.query(
+        `INSERT INTO public.contract_types (
+           tenant_id, code, name, is_clt, esocial_category_code, calculation_regime,
+           has_inss, has_fgts, has_13th, has_vacation, has_employer_rat, has_employer_third_parties
+         ) VALUES (
+           $1::uuid, $2, $3, $4, $5, $6,
+           $7, $8, $9, $10, $11, $12
+         ) RETURNING *;`,
+        [
+          request.user!.tenant_id,
+          d.code,
+          d.name,
+          d.is_clt,
+          d.esocial_category_code,
+          d.calculation_regime,
+          d.has_inss,
+          d.has_fgts,
+          d.has_13th,
+          d.has_vacation,
+          d.has_employer_rat,
+          d.has_employer_third_parties,
+        ]
+      );
+      return rows[0];
+    });
+    return reply.status(201).send({ success: true, data: created });
+  });
+
   // 8. ESCALAS DE TRABALHO (Work Shifts)
   app.get('/work-shifts', { preHandler: [authenticate] }, async (request, reply) => {
     if (!request.withContext) return reply.status(500).send({ success: false, error: 'Contexto não inicializado.' });

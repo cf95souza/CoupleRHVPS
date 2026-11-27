@@ -339,6 +339,14 @@ describe('Gate V4: Saneamento de Bugs Críticos do Motor (BUG-01 a BUG-10)', () 
   });
 
   it('BUG-03: 13º Salário 1ª Parcela (com rubrica 903) + 2ª Parcela com FGTS diferencial exato', async () => {
+    // Isola médias de HE geradas no teste BUG-04 para manter o cenário base de R$ 3.000,00 fixos
+    await withTenantContext({ tenantId, userId: userAdminId, role: 'system_admin' }, async (client) => {
+      await client.query(
+        `DELETE FROM public.payslips WHERE payroll_period_id = $1::uuid AND contract_id = $2::uuid;`,
+        [periodMonthlyId, contractCltId]
+      );
+    });
+
     const res1 = await app.inject({
       method: 'POST',
       url: '/api/v1/payroll/calculate',

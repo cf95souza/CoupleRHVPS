@@ -7,7 +7,9 @@ export type FileCategory =
   | 'CERTIFICATE_A1'
   | 'REPORT'
   | 'AFD_FILE'
-  | 'CONTRACT';
+  | 'CONTRACT'
+  | 'PUNCH_SELFIE'
+  | 'MEDICAL_CERTIFICATE';
 
 export interface StoredFileRecord {
   id: string;

@@ -9,6 +9,11 @@
 import { INSSCalculator } from '../legal/INSSCalculator.js';
 import { IRRFCalculator } from '../legal/IRRFCalculator.js';
 import { FGTSCalculator } from '../legal/FGTSCalculator.js';
+import {
+  FamilyAllowanceCalculator,
+  type FamilyAllowanceCalculationResult,
+  type FamilyAllowanceDependentInput,
+} from '../legal/FamilyAllowanceCalculator.js';
 import { GeneralLegalParameters, InssBracket, IrrfBracket } from './PayrollContext.js';
 import { parseDateParts, formatDate, diffDaysInclusive } from './VacationOverlapCalculator.js';
 import { addMoney, divideMoney, multiplyMoney, round2, subtractMoney, sumMoney } from '../utils/money.js';
@@ -32,6 +37,9 @@ export interface TerminationCalculationInput {
   mediasAdicionais?: number;
   outrosDescontos?: number;
   dependentsCount?: number;
+  dependents?: FamilyAllowanceDependentInput[];
+  employeeRegime?: string | null;
+  hasInssIncidence?: boolean;
   isApprentice?: boolean;
   fgtsBalancePrior?: number;
   inssParameters: InssBracket[];
@@ -47,6 +55,12 @@ export interface TerminationCalculationOutput {
     decimoTerceiroAviso: { avos: number; valor: number };
     feriasProporcionais: { avos: number; valor: number };
     umTercoFerias: { valor: number };
+    salarioFamilia?: {
+      valor: number;
+      dependentes: number;
+      proporcaoDias: number;
+      totalDiasMes: number;
+    };
   };
   descontos: {
     inssSaldo: { valor: number };
@@ -74,6 +88,7 @@ export interface TerminationCalculationOutput {
     dataProjetada: string;
     remuneracaoBase: number;
     dependentesConsiderados: number;
+    salarioFamiliaEvaluation?: FamilyAllowanceCalculationResult | null;
   };
 }
 
@@ -323,6 +338,36 @@ export class TerminationCalculator {
     const baseMulta = sumMoney([estimatedSaldoPrior, fgtsMes, fgtsAviso, fgtsDecimo]);
     const multaFGTS = multiplyMoney(baseMulta, percentualMultaFGTS);
 
+    // 8.5 Salário-Família proporcional aos dias trabalhados na demissão (FOLHA-05)
+    const familyCeiling = Number(
+      input.generalLegalParameters.family_salary_ceiling ??
+        input.generalLegalParameters.family_salary_limit ??
+        0
+    );
+    const familyQuota = Number(
+      input.generalLegalParameters.family_salary_value ??
+        input.generalLegalParameters.family_salary_quota ??
+        0
+    );
+    let familyAllowanceEval: FamilyAllowanceCalculationResult | null = null;
+    let salarioFamiliaValor = 0;
+    if (Array.isArray(input.dependents) && input.dependents.length > 0 && familyCeiling > 0 && familyQuota > 0) {
+      familyAllowanceEval = FamilyAllowanceCalculator.calculate({
+        dependents: input.dependents,
+        competenceYear: termParts.year,
+        competenceMonth: termParts.month,
+        monthlyInssBase: saldoSalarioValor,
+        contractualSalary: remuneracaoBase,
+        familySalaryCeiling: familyCeiling,
+        quotaValue: familyQuota,
+        admissionDate: input.admissionDate,
+        terminationDate: input.resignationDate,
+        employeeRegime: input.employeeRegime || (isApprentice ? 'APPRENTICE' : 'CLT'),
+        hasInssIncidence: input.hasInssIncidence !== false,
+      });
+      salarioFamiliaValor = familyAllowanceEval.totalAmount;
+    }
+
     // 9. Totais
     const proventosTotal = sumMoney([
       saldoSalarioValor,
@@ -331,6 +376,7 @@ export class TerminationCalculator {
       decimoAvisoValor,
       feriasValor,
       umTercoFeriasValor,
+      salarioFamiliaValor,
     ]);
     const descontosTotal = sumMoney([
       inssSaldoValor,
@@ -353,6 +399,14 @@ export class TerminationCalculator {
         decimoTerceiroAviso: { avos: decimoAvisoAvos, valor: decimoAvisoValor },
         feriasProporcionais: { avos: feriasAvos, valor: feriasValor },
         umTercoFerias: { valor: umTercoFeriasValor },
+        salarioFamilia: familyAllowanceEval
+          ? {
+              valor: salarioFamiliaValor,
+              dependentes: familyAllowanceEval.eligibleDependentsCount,
+              proporcaoDias: familyAllowanceEval.proportionalDays,
+              totalDiasMes: familyAllowanceEval.daysInMonth,
+            }
+          : undefined,
       },
       descontos: {
         inssSaldo: { valor: inssSaldoValor },
@@ -391,6 +445,7 @@ export class TerminationCalculator {
         dataProjetada,
         remuneracaoBase,
         dependentesConsiderados: dependents,
+        salarioFamiliaEvaluation: familyAllowanceEval,
       },
     };
   }

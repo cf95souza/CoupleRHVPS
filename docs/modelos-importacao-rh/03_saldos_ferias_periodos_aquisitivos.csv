@@ -1,0 +1,3 @@
+﻿cpf_colaborador;matricula;nome_colaborador;inicio_aquisitivo;fim_aquisitivo;limite_concessivo;dias_direito;dias_gozados;dias_vendidos_abono;dias_saldo_restante;faltas_injustificadas_aquisitivo;status;observacao
+11122233344;MAT-001;Joao Carlos da Silva;2025-03-01;2026-02-28;2027-02-28;30;15;0;15;0;IN_PROGRESS;EXEMPLO - Periodo aquisitivo fechado 2025/2026 com 15 dias ja gozados e 15 dias de saldo restante (apagar antes de importar)
+55566677788;MAT-002;Maria Fernanda Souza;2026-02-10;2027-02-09;2028-02-09;24;0;0;24;7;OPEN;EXEMPLO - Periodo em curso com 7 faltas injustificadas acumuladas (reducao CLT Art. 130 para 24 dias)

@@ -360,6 +360,7 @@ export default function () {
       case '13TH': return '13º Salário';
       case 'THIRTEENTH_1': return '1ª Parcela 13º';
       case 'THIRTEENTH_2': return '2ª Parcela 13º';
+      case 'THIRTEENTH_SINGLE': return '13º Parcela Única';
       case 'VACATION': return 'Férias';
       case 'SEVERANCE': return 'Rescisão';
       default: return type;

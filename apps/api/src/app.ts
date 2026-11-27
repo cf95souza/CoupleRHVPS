@@ -2,6 +2,7 @@ import Fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
+import multipart from '@fastify/multipart';
 import os from 'os';
 import { env, allowedOriginsList } from './config/env.js';
 import { pinoLoggerConfig } from './shared/logger/pinoLogger.js';
@@ -22,7 +23,16 @@ import { orgRoutes } from './modules/org/orgRoutes.js';
 import { vacationRoutes } from './modules/vacations/vacationRoutes.js';
 import { portalRoutes } from './modules/portal/portalRoutes.js';
 import { settingsRoutes } from './modules/settings/settingsRoutes.js';
+import { benefitRoutes } from './modules/benefits/benefitRoutes.js';
+import { unionRoutes } from './modules/unions/unionRoutes.js';
+import { dissidioRoutes } from './modules/payroll/dissidioRoutes.js';
+import { accountingRoutes } from './modules/accounting/accountingRoutes.js';
+import { approvalRoutes } from './modules/approvals/approvalRoutes.js';
+import { esocialRoutes } from './modules/esocial/esocialRoutes.js';
 import { dataBridgeRoutes } from './modules/data/dataBridgeRoutes.js';
+import { migrationRoutes } from './modules/migration/migrationRoutes.js';
+import { notificationRoutes } from './modules/notifications/notificationRoutes.js';
+import { admissionRoutes } from './modules/admissions/admissionRoutes.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -51,6 +61,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(rateLimit, {
     max: 100,
     timeWindow: '1 minute',
+  });
+
+  // Upload multipart seguro (Certificado A1 .pfx / documentos)
+  await app.register(multipart, {
+    limits: {
+      fileSize: 10 * 1024 * 1024, // 10 MB
+    },
   });
 
   // Rota de Health Check para observabilidade e Uptime Kuma
@@ -114,6 +131,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Modulos Protegidos de Seguranca, Folha, Ponto, Documentos, Rescisao e BI
   await app.register(userAccessRoutes, { prefix: '/api/v1/users' });
   await app.register(payrollPeriodRoutes, { prefix: '/api/v1/payroll' });
+  await app.register(dissidioRoutes, { prefix: '/api/v1/payroll/dissidio' });
+  await app.register(accountingRoutes, { prefix: '/api/v1/accounting' });
+  await app.register(approvalRoutes, { prefix: '/api/v1/approvals' });
+  await app.register(esocialRoutes, { prefix: '/api/v1/esocial' });
   await app.register(timeTrackingRoutes, { prefix: '/api/v1/time-tracking' });
   await app.register(documentRoutes, { prefix: '/api/v1/documents' });
   await app.register(terminationRoutes, { prefix: '/api/v1/termination' });
@@ -124,7 +145,12 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(vacationRoutes, { prefix: '/api/v1/vacations' });
   await app.register(portalRoutes, { prefix: '/api/v1/portal' });
   await app.register(settingsRoutes, { prefix: '/api/v1/settings' });
+  await app.register(benefitRoutes, { prefix: '/api/v1/benefits' });
+  await app.register(unionRoutes, { prefix: '/api/v1' });
   await app.register(dataBridgeRoutes, { prefix: '/api/v1' });
+  await app.register(migrationRoutes, { prefix: '/api/v1/migration' });
+  await app.register(notificationRoutes, { prefix: '/api/v1/notifications' });
+  await app.register(admissionRoutes, { prefix: '/api/v1/admissions' });
 
   return app;
 }

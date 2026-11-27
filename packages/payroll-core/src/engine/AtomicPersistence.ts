@@ -27,6 +27,18 @@ export interface RawCalculatedPayslip {
   base_irrf: number;
   base_fgts: number;
   fgts_month: number;
+  inss_employee?: number;
+  maternity_deduction?: number;
+  family_salary_deduction?: number;
+  ind_mv?: number | null;
+  other_employments_base?: number;
+  other_employments_inss?: number;
+  has_insufficiency?: boolean;
+  insufficiency_credit?: number;
+  consignable_margin?: number;
+  consignable_loan_capped?: boolean;
+  calculation_regime?: string;
+  special_retirement_exposure_code?: string;
   status?: string;
   legal_version_id?: string;
   engine_version?: string;
@@ -46,9 +58,17 @@ export interface CompanyTaxItem {
   total_base_inss: number;
   total_base_fgts: number;
   inss_patronal: number;
+  inss_patronal_pro_labore?: number;
   rat_adjusted: number;
+  rat_special_retirement_amount?: number;
   terceiros: number;
   fgts_patronal: number;
+  maternity_deduction?: number;
+  family_salary_deduction?: number;
+  net_inss_due?: number;
+  cprb_reduction_ratio?: number;
+  cprb_effective_cpp_rate?: number;
+  breakdown_json?: Record<string, any>;
   total_taxes: number;
 }
 
@@ -64,6 +84,9 @@ export interface AtomicPayrollPayload {
     base_irrf: number;
     base_fgts: number;
     fgts_month: number;
+    ind_mv: number | null;
+    other_employments_base: number;
+    other_employments_inss: number;
     status: string;
     legal_version_id: string | null;
     engine_version: string;
@@ -167,6 +190,9 @@ export function buildAtomicPayrollPayload(params: {
       base_irrf: p.base_irrf,
       base_fgts: p.base_fgts,
       fgts_month: p.fgts_month,
+      ind_mv: p.ind_mv ?? null,
+      other_employments_base: p.other_employments_base ?? 0,
+      other_employments_inss: p.other_employments_inss ?? 0,
       status: p.status || 'CALCULATED',
       legal_version_id: p.legal_version_id || null,
       engine_version: p.engine_version || '1.0.0',
@@ -202,9 +228,17 @@ export function buildAtomicPayrollPayload(params: {
       total_base_inss: t.total_base_inss,
       total_base_fgts: t.total_base_fgts,
       inss_patronal: t.inss_patronal,
+      inss_patronal_pro_labore: t.inss_patronal_pro_labore ?? 0,
       rat_adjusted: t.rat_adjusted,
+      rat_special_retirement_amount: t.rat_special_retirement_amount ?? 0,
       terceiros: t.terceiros,
       fgts_patronal: t.fgts_patronal,
+      maternity_deduction: t.maternity_deduction ?? 0,
+      family_salary_deduction: t.family_salary_deduction ?? 0,
+      net_inss_due: t.net_inss_due ?? 0,
+      cprb_reduction_ratio: t.cprb_reduction_ratio ?? 0,
+      cprb_effective_cpp_rate: t.cprb_effective_cpp_rate ?? 20,
+      breakdown_json: t.breakdown_json ?? {},
       total_taxes: t.total_taxes,
     })),
   };

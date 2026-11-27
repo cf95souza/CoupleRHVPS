@@ -17,6 +17,7 @@ import { supabase } from "../lib/apiClient";
 import { formatDate } from "../lib/dateUtils";
 import { toast } from 'sonner';
 import { confirmDialog } from '../components/ConfirmDialogProvider';
+import { AlimonyBeneficiariesPanel } from "../components/employees/AlimonyBeneficiariesPanel";
 
 interface Rubric {
   id: string;
@@ -46,6 +47,7 @@ const PAYROLL_TYPES_LIST = [
   { id: 'VACATION', label: 'Férias' },
   { id: 'THIRTEENTH_1', label: '13º (1ª Parcela)' },
   { id: 'THIRTEENTH_2', label: '13º (2ª Parcela)' },
+  { id: 'THIRTEENTH_SINGLE', label: '13º (Parcela Única)' },
   { id: 'COMPLEMENTARY', label: 'Complementar' },
 ];
 
@@ -260,7 +262,10 @@ export default function ({
   }
 
   return (
-    <div className="space-y-6 animate-in fade-in">
+    <div className="space-y-8 animate-in fade-in">
+      <AlimonyBeneficiariesPanel contractId={contractId} />
+
+      <div className="space-y-6 pt-6 border-t border-slate-200">
       <div className="flex justify-between items-center mb-4">
         <div>
           <h2 className="text-lg font-bold text-slate-900 font-display">
@@ -389,6 +394,7 @@ export default function ({
             </div>
           ))
         )}
+      </div>
       </div>
 
       {isModalOpen && createPortal(

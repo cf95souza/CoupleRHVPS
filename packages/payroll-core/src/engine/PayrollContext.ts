@@ -1,4 +1,20 @@
 import { normalizeVariableName } from '../variablesCatalog.js';
+import type { IrrfTaxationBucket, PriorIrrfCashEntry } from '../legal/IRRFCalculator.js';
+import type {
+  AlimonyBeneficiaryRule,
+  AlimonySplitResult,
+  AlimonySolverTraceStep,
+} from '../legal/AlimonySolver.js';
+import type {
+  FamilyAllowanceCalculationResult,
+  FamilyAllowanceDependentInput,
+} from '../legal/FamilyAllowanceCalculator.js';
+import type {
+  IndMVCode,
+  OtherEmploymentInput,
+} from '../legal/MultipleEmploymentINSSCalculator.js';
+import type { CollectiveAgreementData } from '../legal/CollectiveAgreementCalculator.js';
+import type { AutonomousServiceType, CalculationRegimeType } from '../legal/MultiRegimeCalculator.js';
 
 export type RubricKind =
   | 'SALARY_BASE'
@@ -20,12 +36,18 @@ export type RubricKind =
   | 'VACATION'
   | 'THIRTEENTH'
   | 'TERMINATION'
+  | 'MATERNITY_LEAVE'
+  | 'SICK_LEAVE_COMPANY'
+  | 'UNPAID_LEAVE'
+  | 'FGTS_COMPULSORY_BASE'
   | 'INSS'
   | 'IRRF'
   | 'FGTS'
   | 'NIGHT_SHIFT'
   | 'UNHEALTHY'
   | 'HAZARD'
+  | 'INSUFFICIENCY_CREDIT'
+  | 'INSUFFICIENCY_DEBIT'
   | 'OTHER';
 
 export interface Rubric {
@@ -49,6 +71,11 @@ export interface Rubric {
   factor?: number;
   formula?: string;
   calculation_order: number;
+  discount_priority?: number | null;
+  average_type?: 'NONE' | 'HOURS_QUANTITY' | 'MONETARY_VALUE' | 'MONETARY_INDEXED';
+  include_in_vacation_avg?: boolean;
+  include_in_13th_avg?: boolean;
+  include_in_notice_avg?: boolean;
   incidencias: {
     inss: boolean;
     irrf: boolean;
@@ -89,6 +116,47 @@ export interface CalculationMemory {
   origin: string;
 }
 
+export interface IrrfCashLedgerSnapshot {
+  cash_year: number;
+  cash_month: number;
+  payment_date: string;
+  taxation_bucket: IrrfTaxationBucket;
+  gross_taxable: number;
+  inss_deducted: number;
+  alimony_deducted: number;
+  dependents_deducted: number;
+  simplified_used: boolean;
+  irrf_withheld: number;
+}
+
+export type NegativeNetPolicy = 'BLOCK' | 'INSUFFICIENCY_CARRYOVER' | 'CAP_OPTIONAL_DISCOUNTS';
+
+export interface LoanRecordInput {
+  id: string;
+  contract_id: string;
+  financial_institution: string;
+  contract_number: string;
+  total_amount: number;
+  installment_amount: number;
+  total_installments: number;
+  paid_installments: number;
+  start_date: string;
+  is_active: boolean;
+  status?: string;
+}
+
+export interface BalanceDebtRecordInput {
+  id: string;
+  contract_id: string;
+  amount: number;
+  balance_remaining: number;
+  competence_year: number;
+  competence_month: number;
+  target_year: number;
+  target_month: number;
+  status: string;
+}
+
 export interface CalculationResult {
   total_proventos: number;
   total_descontos: number;
@@ -103,6 +171,18 @@ export interface CalculationResult {
     fgts: number;
   };
   memoria_calculo: CalculationMemory[];
+  irrf_cash_ledger_entry?: IrrfCashLedgerSnapshot | null;
+  alimony_splits?: AlimonySplitResult[];
+  alimony_solver_trace?: AlimonySolverTraceStep[];
+  total_family_salary?: number;
+  family_salary_evaluation?: FamilyAllowanceCalculationResult | null;
+  ind_mv?: IndMVCode | null;
+  other_employments_base?: number;
+  other_employments_inss?: number;
+  has_insufficiency?: boolean;
+  insufficiency_credit?: number;
+  consignable_margin?: number;
+  consignable_loan_capped?: boolean;
   status: string;
 }
 
@@ -127,6 +207,7 @@ export interface GeneralLegalParameters {
   family_salary_quota?: number;
   family_salary_value?: number;
   family_salary_limit?: number;
+  family_salary_ceiling?: number;
   fgts_standard_aliquot?: number;
   fgts_apprentice_aliquot?: number;
   irrf_exemption_limit?: number;
@@ -154,6 +235,7 @@ export interface PayrollContextData {
   inss_parameters?: InssBracket[];
   irrf_parameters?: IrrfBracket[];
   general_legal_parameters?: GeneralLegalParameters;
+  collective_agreement?: CollectiveAgreementData | null;
 }
 
 export class PayrollContext {
@@ -181,6 +263,37 @@ export class PayrollContext {
   fgts_base_already_taxed: number = 0;
   // T17: Total de pensão alimentícia judicial apurada (dedutível da base de IRRF)
   total_alimony: number = 0;
+  // FOLHA-02: IRRF em Regime de Caixa (Lei 7.713/88 / IN RFB 1.500)
+  irrf_regime: 'CASH' | 'COMPETENCE' = 'CASH';
+  payment_date?: string | null;
+  withhold_irrf_on_advance: boolean = false;
+  prior_cash_irrf_entries: PriorIrrfCashEntry[] = [];
+  // FOLHA-03: Beneficiários estruturados de pensão alimentícia para solver circular e splits
+  alimony_beneficiaries: AlimonyBeneficiaryRule[] = [];
+  // FOLHA-05: Salário-Família automático e elegibilidade de dependentes/vínculo
+  family_salary_dependents: FamilyAllowanceDependentInput[] = [];
+  admission_date?: string | null = null;
+  termination_date?: string | null = null;
+  employee_regime: string = 'CLT';
+  has_unpaid_or_inss_only_month: boolean = false;
+  // FOLHA-06: Múltiplos vínculos previdenciários (outro empregador / mesmo CPF no grupo)
+  other_employments: OtherEmploymentInput[] = [];
+  // FOLHA-07: Prioridade de descontos, política de saldo devedor e consignados
+  negative_net_policy: NegativeNetPolicy = 'INSUFFICIENCY_CARRYOVER';
+  loans: LoanRecordInput[] = [];
+  prior_balance_debts: BalanceDebtRecordInput[] = [];
+  // FOLHA-09: Sindicatos e Convenção Coletiva de Trabalho (CCT / ACT)
+  collective_agreement?: CollectiveAgreementData | null = null;
+  // FOLHA-11: Rateio de INSS/FGTS em férias partidas entre dois meses (mantendo IRRF integral no caixa)
+  vacation_inss_base_override?: number | null = null;
+  vacation_fgts_base_override?: number | null = null;
+  // FOLHA-12: 13º Salário Complementar em Janeiro (Decreto 10.854/2021 art. 79)
+  prior_thirteenth_irrf_entry?: PriorIrrfCashEntry | null = null;
+  // FOLHA-15: Multi-Regime eSocial (Pró-Labore, Autônomo/RPA, Estagiário, Intermitente, Horista/Comissionista)
+  calculation_regime: CalculationRegimeType = 'CLT';
+  esocial_category_code: string = '101';
+  autonomous_service_type: AutonomousServiceType = 'GENERAL';
+  iss_rate: number = 0;
   
   // Variables tracking
   variables: Record<string, number>;
@@ -210,13 +323,51 @@ export class PayrollContext {
       throw new Error('Parâmetro legal obrigatório ausente: salario_minimo');
     }
     this.salario_minimo = Number(sm);
-    this.rubricas = new Map((data.rubricas || []).map((r: Rubric) => [r.id, structuredClone(r)]));
+    this.rubricas = data.rubricas instanceof Map
+      ? new Map(Array.from(data.rubricas.entries() as Iterable<[string, Rubric]>).map(([k, v]) => [k, structuredClone(v)]))
+      : new Map((data.rubricas || []).map((r: Rubric) => [r.id, structuredClone(r)]));
     this.eventos = data.eventos || [];
     this.allow_cumulative_hazard_allowances = Boolean(data.allow_cumulative_hazard_allowances);
     this.is_apprentice = Boolean(data.is_apprentice);
     this.base_inss_already_taxed = Number(data.base_inss_already_taxed || 0);
     this.fgts_base_already_taxed = Number(data.fgts_base_already_taxed || 0);
     this.total_alimony = Number(data.total_alimony || 0);
+    this.irrf_regime = data.irrf_regime === 'COMPETENCE' ? 'COMPETENCE' : 'CASH';
+    this.payment_date = data.payment_date || null;
+    this.withhold_irrf_on_advance = Boolean(data.withhold_irrf_on_advance);
+    this.prior_cash_irrf_entries = Array.isArray(data.prior_cash_irrf_entries)
+      ? data.prior_cash_irrf_entries
+      : [];
+    this.alimony_beneficiaries = Array.isArray(data.alimony_beneficiaries)
+      ? data.alimony_beneficiaries
+      : [];
+    this.family_salary_dependents = Array.isArray(data.family_salary_dependents)
+      ? data.family_salary_dependents
+      : [];
+    this.admission_date = data.admission_date || null;
+    this.termination_date = data.termination_date || null;
+    this.employee_regime = data.employee_regime || 'CLT';
+    this.has_unpaid_or_inss_only_month = Boolean(data.has_unpaid_or_inss_only_month);
+    this.other_employments = Array.isArray(data.other_employments)
+      ? data.other_employments
+      : [];
+    this.negative_net_policy = data.negative_net_policy || 'INSUFFICIENCY_CARRYOVER';
+    this.loans = Array.isArray(data.loans) ? data.loans : [];
+    this.prior_balance_debts = Array.isArray(data.prior_balance_debts) ? data.prior_balance_debts : [];
+    this.collective_agreement = data.collective_agreement || null;
+    this.vacation_inss_base_override =
+      data.vacation_inss_base_override !== undefined && data.vacation_inss_base_override !== null
+        ? Number(data.vacation_inss_base_override)
+        : null;
+    this.vacation_fgts_base_override =
+      data.vacation_fgts_base_override !== undefined && data.vacation_fgts_base_override !== null
+        ? Number(data.vacation_fgts_base_override)
+        : null;
+    this.prior_thirteenth_irrf_entry = data.prior_thirteenth_irrf_entry || null;
+    this.calculation_regime = data.calculation_regime || 'CLT';
+    this.esocial_category_code = data.esocial_category_code || '101';
+    this.autonomous_service_type = data.autonomous_service_type || 'GENERAL';
+    this.iss_rate = Number(data.iss_rate || 0);
     this.contract_incidences = data.contract_incidences || null;
     this.inss_parameters = data.inss_parameters || [];
     this.irrf_parameters = data.irrf_parameters || [];
@@ -243,9 +394,13 @@ export class PayrollContext {
       'BASE_HORA_EXTRA_NOTURNA': this.salario_base,
       'BASE_FERIAS': this.salario_base,
       'BASE_13': this.salario_base,
+      'PISO_SALARIAL_CCT': Number(this.collective_agreement?.base_salary_floor || 0),
+      'ADICIONAL_TEMPO_SERVICO': 0,
+      'ATS': 0,
       // Variáveis auxiliares do catálogo de seeds 2026 (valor 0 quando não há evento específico)
       'COTA_FAMILIA': Number(this.general_legal_parameters?.family_salary_value ?? this.general_legal_parameters?.family_salary_quota ?? 0),
       'NUM_DEPENDENTES_SF': 0,
+      'PROPORCAO_SF': 1,
       'VALOR_VT': 0,
       'VALOR_FERIAS': 0,
       'VALOR_ADIANTAMENTO_13': 0,

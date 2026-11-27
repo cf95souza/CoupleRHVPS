@@ -17383,3 +17383,666 @@ CREATE UNIQUE INDEX idx_payroll_company_taxes_period_company
 
 - **Seeds `apps/api/db/seeds/001_system_and_legal_2026.sql`**: atualizados parâmetros 2026 (`irrf_exemption_limit = 5000.00`, `irrf_reduction_formula_limit = 7350.00`), adicionadas rubricas de sistema `250`, `407`, `703`, `704`, `805`, `807` e `850`, preenchidos `factor` e `percentage` nas rubricas padrão e padronizadas as fórmulas em PT-BR (`SALARIO_BASE`, `BASE_HORA_EXTRA`, `BASE_HORA_EXTRA_NOTURNA`, `QUANTIDADE`, `DIAS_INUTEIS`).
 
+---
+
+## 28. Migration `0015_payroll_calculation_jobs_and_watchdog.sql` (FASE V5 / FOLHA-01)
+
+Aplicada e validada em PostgreSQL 17 puro (`couplerh-db` e `couplerh-test-db`) para suporte ao worker assíncrono de folha em lotes (`pg-boss`), simulações *What-If* e Watchdog anti-deadlock:
+
+```sql
+-- 1. Schema dedicado para pg-boss sob a role couplerh_app (NOBYPASSRLS)
+CREATE SCHEMA IF NOT EXISTS pgboss;
+GRANT USAGE, CREATE ON SCHEMA pgboss TO couplerh_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA pgboss GRANT ALL ON TABLES TO couplerh_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA pgboss GRANT ALL ON SEQUENCES TO couplerh_app;
+
+-- 2. Colunas de trava e heartbeat em public.payroll_periods
+ALTER TABLE public.payroll_periods
+    ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
+
+-- 3. Tabela de Jobs de Processamento em Lotes e Simulações What-If
+CREATE TABLE IF NOT EXISTS public.payroll_calculation_jobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
+    period_id UUID NOT NULL REFERENCES public.payroll_periods(id) ON DELETE CASCADE,
+    mode TEXT NOT NULL DEFAULT 'REAL' CHECK (mode IN ('REAL', 'SIMULATION')),
+    scenario_params JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status TEXT NOT NULL DEFAULT 'QUEUED' CHECK (status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED')),
+    total_contracts INT NOT NULL DEFAULT 0,
+    processed_contracts INT NOT NULL DEFAULT 0,
+    error_count INT NOT NULL DEFAULT 0,
+    errors_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    started_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+    contract_id_filter UUID REFERENCES public.contracts(id) ON DELETE SET NULL,
+    restore_period_status TEXT DEFAULT 'DRAFT',
+    locked_at TIMESTAMPTZ,
+    heartbeat_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Índices operacionais e trava única de lote REAL ativo por competência
+CREATE INDEX IF NOT EXISTS idx_payroll_calc_jobs_tenant_period
+    ON public.payroll_calculation_jobs (tenant_id, period_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payroll_calc_jobs_active
+    ON public.payroll_calculation_jobs (status, heartbeat_at)
+    WHERE status IN ('QUEUED', 'RUNNING');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payroll_calc_jobs_unique_active_real
+    ON public.payroll_calculation_jobs (period_id)
+    WHERE mode = 'REAL' AND status IN ('QUEUED', 'RUNNING');
+
+-- RLS estrita (ENABLE + FORCE) + Trigger de auditoria audit_payroll_calculation_jobs_trigger
+-- Funções SECURITY DEFINER com GRANT EXECUTE TO couplerh_app:
+--   - public.recover_stuck_payroll_calculations(p_stale_minutes INT DEFAULT 5) RETURNS JSONB
+--   - public.worker_fail_payroll_job(p_job_id UUID, p_error TEXT) RETURNS VOID
+```
+
+---
+
+## 29. Migration `0016_pgboss_bootstrap.sql` (Bootstrap `pg-boss` v10 sob `couplerh_app`)
+
+Provisiona de forma idempotente as tabelas, tipo enum `pgboss.job_state` e funções (`create_queue`, `delete_queue`) da versão `24` do `pg-boss` v10 no schema `pgboss`, transferindo o ownership (`OWNER TO couplerh_app`) estritamente para o schema `pgboss` e seus objetos internos para que a role não-superuser `couplerh_app` crie partições de fila dinamicamente sem necessitar de `CREATE ON DATABASE`.
+
+---
+
+## 30. Migration `0017_irrf_cash_regime_ledger.sql` (FASE V5 / FOLHA-02 — IRRF em Regime de Caixa)
+
+Aplicada e validada em PostgreSQL 17 puro (`couplerh-db` e `couplerh-test-db`) para controle contábil e fiscal do IRRF em Regime de Caixa (Lei 7.713/88 / IN RFB 1.500):
+
+```sql
+-- 1. Regime de apuração e data efetiva de pagamento em public.payroll_periods
+ALTER TABLE public.payroll_periods
+    ADD COLUMN IF NOT EXISTS irrf_regime TEXT NOT NULL DEFAULT 'CASH'
+    CHECK (irrf_regime IN ('CASH', 'COMPETENCE'));
+
+-- 2. Ledger Oficial de IRRF em Regime de Caixa (public.irrf_cash_ledger)
+CREATE TABLE IF NOT EXISTS public.irrf_cash_ledger (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
+    worker_id UUID NOT NULL REFERENCES public.workers(id) ON DELETE CASCADE,
+    contract_id UUID NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
+    period_id UUID NOT NULL REFERENCES public.payroll_periods(id) ON DELETE CASCADE,
+    payslip_id UUID NOT NULL REFERENCES public.payslips(id) ON DELETE CASCADE,
+    cash_year INT NOT NULL,
+    cash_month INT NOT NULL CHECK (cash_month BETWEEN 1 AND 12),
+    payment_date DATE NOT NULL,
+    taxation_bucket TEXT NOT NULL CHECK (
+        taxation_bucket IN (
+            'MONTHLY_CASH',
+            'VACATION_EXCLUSIVE',
+            'THIRTEENTH_EXCLUSIVE',
+            'PLR_EXCLUSIVE',
+            'RRA_EXCLUSIVE'
+        )
+    ),
+    gross_taxable NUMERIC(15,2) NOT NULL DEFAULT 0.00,
+    inss_deducted NUMERIC(15,2) NOT NULL DEFAULT 0.00,
+    alimony_deducted NUMERIC(15,2) NOT NULL DEFAULT 0.00,
+    dependents_deducted NUMERIC(15,2) NOT NULL DEFAULT 0.00,
+    simplified_used BOOLEAN NOT NULL DEFAULT FALSE,
+    irrf_withheld NUMERIC(15,2) NOT NULL DEFAULT 0.00,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (payslip_id, taxation_bucket)
+);
+
+CREATE INDEX IF NOT EXISTS idx_irrf_cash_ledger_lookup
+    ON public.irrf_cash_ledger (tenant_id, worker_id, cash_year, cash_month, taxation_bucket);
+
+-- RLS estrita (ENABLE + FORCE ROW LEVEL SECURITY) usando has_permission() e can_access_contract()
+-- + Trigger de auditoria forense T29 (audit_irrf_cash_ledger_trigger)
+```
+
+---
+
+## 31. Migration `0018_alimony_enterprise_and_splits.sql` (FASE V5 / FOLHA-03 — Pensão Alimentícia Multi-Beneficiário & Splits)
+
+Aplicada e validada em PostgreSQL 17 puro (`couplerh-db` e `couplerh-test-db`) para gestão multi-beneficiário de pensão alimentícia judicial e rateio auditável por holerite:
+
+```sql
+-- 1. Cadastro Estruturado de Beneficiários de Pensão Alimentícia (public.alimony_beneficiaries)
+CREATE TABLE IF NOT EXISTS public.alimony_beneficiaries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    contract_id UUID NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
+    rubric_id UUID REFERENCES public.rubrics(id) ON DELETE RESTRICT,
+    beneficiary_name TEXT NOT NULL,
+    beneficiary_cpf VARCHAR(11),
+    beneficiary_birth_date DATE,
+    relationship TEXT,
+    court_process_number TEXT,
+    court_name TEXT,
+    calculation_basis TEXT NOT NULL DEFAULT 'NET_SALARY' CHECK (
+        calculation_basis IN ('NET_SALARY', 'GROSS_SALARY', 'BASE_SALARY', 'MINIMUM_WAGE', 'FIXED_AMOUNT')
+    ),
+    percentage NUMERIC(8,4),
+    fixed_amount NUMERIC(15,2),
+    min_amount NUMERIC(15,2),
+    max_amount NUMERIC(15,2),
+    payment_method TEXT NOT NULL DEFAULT 'BANK_TRANSFER' CHECK (
+        payment_method IN ('BANK_TRANSFER', 'PIX', 'JUDICIAL_DEPOSIT')
+    ),
+    pix_key_type TEXT CHECK (pix_key_type IN ('CPF', 'CNPJ', 'EMAIL', 'PHONE', 'EVP') OR pix_key_type IS NULL),
+    pix_key TEXT,
+    bank_code VARCHAR(10),
+    bank_name TEXT,
+    bank_agency VARCHAR(20),
+    bank_account VARCHAR(30),
+    bank_account_type TEXT CHECK (bank_account_type IN ('CORRENTE', 'POUPANCA', 'SALARIO', 'JUDICIAL') OR bank_account_type IS NULL),
+    apply_on_monthly BOOLEAN NOT NULL DEFAULT TRUE,
+    apply_on_advance BOOLEAN NOT NULL DEFAULT FALSE,
+    apply_on_vacation BOOLEAN NOT NULL DEFAULT TRUE,
+    apply_on_thirteenth BOOLEAN NOT NULL DEFAULT TRUE,
+    apply_on_termination BOOLEAN NOT NULL DEFAULT TRUE,
+    apply_on_complementary BOOLEAN NOT NULL DEFAULT TRUE,
+    start_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    end_date DATE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ
+);
+
+-- 2. Rateio Auditável de Pensão por Holerite e Beneficiário (public.payslip_alimony_splits)
+CREATE TABLE IF NOT EXISTS public.payslip_alimony_splits (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    payroll_period_id UUID NOT NULL REFERENCES public.payroll_periods(id) ON DELETE CASCADE,
+    payslip_id UUID NOT NULL REFERENCES public.payslips(id) ON DELETE CASCADE,
+    contract_id UUID NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
+    beneficiary_id UUID REFERENCES public.alimony_beneficiaries(id) ON DELETE SET NULL,
+    beneficiary_name TEXT NOT NULL,
+    beneficiary_cpf VARCHAR(11),
+    court_process_number TEXT,
+    calculation_basis TEXT NOT NULL,
+    percentage_applied NUMERIC(8,4),
+    base_amount NUMERIC(15,2) NOT NULL DEFAULT 0.00,
+    amount NUMERIC(15,2) NOT NULL DEFAULT 0.00,
+    irrf_converged NUMERIC(15,2) NOT NULL DEFAULT 0.00,
+    solver_iterations INT NOT NULL DEFAULT 0,
+    payment_method TEXT NOT NULL DEFAULT 'BANK_TRANSFER',
+    payment_details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 3. Imutabilidade CLT em folha CLOSED + RLS estrita (ENABLE + FORCE) + Auditoria T29
+--   - trg_payslip_alimony_splits_closed_immutability -> trg_block_closed_payroll_modification()
+--   - audit_alimony_beneficiaries_trigger & audit_payslip_alimony_splits_trigger -> audit.audit_trigger_func()
+```
+
+---
+
+## 32. Migration `0019_leaves_esocial_dctfweb_and_stability.sql` (FASE V5 / FOLHA-04 — Afastamentos Tabela 18 eSocial, DCTFWeb Maternidade & Perda de Férias)
+
+Aplicada e validada em PostgreSQL 17 puro (`couplerh-db` e `couplerh-test-db`):
+
+```sql
+-- 1. Evolução de public.leaves (agregação 60d CID, estabilidade 12m, prorrogação Empresa Cidadã 180d)
+ALTER TABLE public.leaves
+    ADD COLUMN IF NOT EXISTS company_paid_days INT NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS is_same_cid_relapse BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS parent_leave_id UUID REFERENCES public.leaves(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS stability_until DATE,
+    ADD COLUMN IF NOT EXISTS is_extended_maternity BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS notes TEXT;
+
+-- 2. Evolução de public.payroll_company_taxes (deduções DCTFWeb automáticas)
+ALTER TABLE public.payroll_company_taxes
+    ADD COLUMN IF NOT EXISTS maternity_deduction NUMERIC(15,2) NOT NULL DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS family_salary_deduction NUMERIC(15,2) NOT NULL DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS net_inss_due NUMERIC(15,2) NOT NULL DEFAULT 0.00;
+
+-- 3. Evolução de public.vacation_periods (perda de período aquisitivo por >180d INSS - CLT Art. 133 IV)
+--    Status ampliado para incluir 'FORFEITED'
+ALTER TABLE public.vacation_periods
+    ADD COLUMN IF NOT EXISTS lost_by_leave BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS leave_days_in_acquisition INT NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS loss_reason TEXT;
+
+-- 4. Rubricas de sistema inseridas:
+--    '104' Salário-Maternidade (EARNING, DIAS, SALARIO_BASE)
+--    '105' Atestado / Auxílio-Doença Primeiros 15 Dias Empresa (EARNING, DIAS, SALARIO_BASE)
+--    '906' Base FGTS Afastamento Legal Acidente Trabalho / Serviço Militar (NEUTRAL, DIAS, gera_base_fgts=true)
+-- 5. RPC public.save_payroll_period atualizada para persistir maternity_deduction, family_salary_deduction e net_inss_due.
+```
+
+
+
+
+
+
+---
+
+## 33. Migration `0020_family_allowance_and_dependents_compliance.sql` (FASE V5 / FOLHA-05 — Salário-Família, Vacina/Escola & DCTFWeb)
+
+Aplicada e validada em PostgreSQL 17 puro (`couplerh-db` e `couplerh-test-db`):
+
+```sql
+-- 1. Evolução de public.dependents (vigência, certidão, vacina <= 6a e escola 7..14a)
+ALTER TABLE public.dependents
+    ADD COLUMN IF NOT EXISTS start_date DATE,
+    ADD COLUMN IF NOT EXISTS end_date DATE,
+    ADD COLUMN IF NOT EXISTS birth_certificate_number TEXT,
+    ADD COLUMN IF NOT EXISTS vaccination_card_date DATE,
+    ADD COLUMN IF NOT EXISTS school_frequency_date DATE,
+    ADD COLUMN IF NOT EXISTS vaccination_proof_file_id UUID REFERENCES public.stored_files(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS school_proof_file_id UUID REFERENCES public.stored_files(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_dependents_worker_family_salary
+    ON public.dependents (tenant_id, worker_id)
+    WHERE deleted_at IS NULL;
+
+-- 2. Padronização da Rubrica Oficial '305' (Salário-Família — Natureza eSocial 1409)
+--    EARNING, FAMILY_SALARY, isenta de INSS/IRRF/FGTS/Patronal/RAT/Terceiros
+--    Aposentadoria da antiga seed '501' de Salário Família para evitar conflito com férias legado.
+```
+
+---
+
+## 34. Migration `0021_multiple_employments_indmv.sql` (FASE V5 / FOLHA-06 — Múltiplos Vínculos Previdenciários `indMV` 1/2/3)
+
+Aplicada e validada em PostgreSQL 17 puro (`couplerh-db` e `couplerh-test-db`):
+
+```sql
+-- 1. Cadastro Estruturado de Vínculos Externos (eSocial S-1200 infoMV / remunOutrEmpr)
+CREATE TABLE IF NOT EXISTS public.employee_other_employments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    worker_id UUID NOT NULL REFERENCES public.workers(id) ON DELETE CASCADE,
+    contract_id UUID REFERENCES public.contracts(id) ON DELETE CASCADE,
+    employer_cnpj VARCHAR(14) NOT NULL,
+    employer_name TEXT NOT NULL,
+    esocial_category_code VARCHAR(10) NOT NULL DEFAULT '101',
+    ind_mv SMALLINT NOT NULL CHECK (ind_mv IN (1, 2, 3)),
+    competence_year INT NOT NULL,
+    competence_month INT NOT NULL CHECK (competence_month BETWEEN 1 AND 13),
+    remuneration_amount NUMERIC(15,2) NOT NULL DEFAULT 0.00 CHECK (remuneration_amount >= 0),
+    inss_withheld NUMERIC(15,2) NOT NULL DEFAULT 0.00 CHECK (inss_withheld >= 0),
+    is_recurring BOOLEAN NOT NULL DEFAULT FALSE,
+    notes TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_other_employments_worker_comp
+    ON public.employee_other_employments (tenant_id, worker_id, competence_year, competence_month)
+    WHERE deleted_at IS NULL AND is_active = TRUE;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_other_employments_unique_cnpj_comp
+    ON public.employee_other_employments (tenant_id, worker_id, employer_cnpj, competence_year, competence_month)
+    WHERE deleted_at IS NULL;
+
+-- 2. Rastreabilidade de Múltiplos Vínculos (indMV) nos Holerites (S-1200 infoMV)
+ALTER TABLE public.payslips
+    ADD COLUMN IF NOT EXISTS ind_mv SMALLINT CHECK (ind_mv IN (1, 2, 3) OR ind_mv IS NULL),
+    ADD COLUMN IF NOT EXISTS other_employments_base NUMERIC(15,2) NOT NULL DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS other_employments_inss NUMERIC(15,2) NOT NULL DEFAULT 0.00;
+
+-- 3. RLS estrita (ENABLE + FORCE ROW LEVEL SECURITY) com employee_other_employments_select_policy e employee_other_employments_manage_policy
+-- 4. Trigger de Auditoria Forense T29 (audit_employee_other_employments_trigger -> audit.audit_trigger_func())
+-- 5. RPC public.save_payroll_period atualizada para gravar ind_mv, other_employments_base e other_employments_inss em public.payslips.
+```
+
+
+---
+
+## 35. Migration `0022_discount_priority_and_negative_net_carryover.sql` (FASE V5 / FOLHA-07 — Fila de Prioridade Legal de Descontos, Margem Consignável 35% e Insuficiência de Saldo 499/899)
+
+Aplicada e validada em PostgreSQL 17 puro (`couplerh-db` e `couplerh-test-db`):
+
+```sql
+-- 1. Fila de Prioridade Legal nas Rubricas (10: Impostos -> 20: Alimentos -> 30: Faltas -> 40: Consignado -> 50: Beneficios -> 60: Outros)
+ALTER TABLE public.rubrics
+    ADD COLUMN IF NOT EXISTS discount_priority SMALLINT NOT NULL DEFAULT 50;
+
+-- 2. Rubricas Oficiais do Sistema (499 e 899)
+-- 499: Insuficiência de Saldo (EARNING, NEUTRAL, prioridade 0, sem encargos)
+-- 899: Desconto de Insuficiência de Saldo Anterior (DEDUCTION, OTHER, prioridade 35, sem encargos)
+
+-- 3. Política de Líquido Negativo em public.companies
+ALTER TABLE public.companies
+    ADD COLUMN IF NOT EXISTS negative_net_policy VARCHAR(30) NOT NULL DEFAULT 'INSUFFICIENCY_CARRYOVER'
+    CHECK (negative_net_policy IN ('INSUFFICIENCY_CARRYOVER', 'PROHIBIT_NEGATIVE'));
+
+-- 4. Status, Notas e Auditoria em Empréstimos Consignados (public.payroll_loans)
+ALTER TABLE public.payroll_loans
+    ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'PAUSED', 'SETTLED', 'CANCELLED')),
+    ADD COLUMN IF NOT EXISTS notes TEXT,
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+-- 5. Gestão de Saldos Devedores / Insuficiência de Saldo Carregada (public.employee_balance_debts)
+CREATE TABLE IF NOT EXISTS public.employee_balance_debts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    contract_id UUID NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
+    worker_id UUID NOT NULL REFERENCES public.workers(id) ON DELETE CASCADE,
+    source_payroll_period_id UUID NOT NULL REFERENCES public.payroll_periods(id) ON DELETE CASCADE,
+    debt_amount NUMERIC(15,2) NOT NULL CHECK (debt_amount > 0),
+    cleared_amount NUMERIC(15,2) NOT NULL DEFAULT 0.00 CHECK (cleared_amount >= 0),
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'PARTIAL', 'CLEARED', 'CANCELLED')),
+    cleared_payroll_period_id UUID REFERENCES public.payroll_periods(id) ON DELETE SET NULL,
+    cleared_at TIMESTAMPTZ,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_balance_debts_contract_status
+    ON public.employee_balance_debts (tenant_id, contract_id, status)
+    WHERE deleted_at IS NULL;
+
+-- 6. RLS estrita (ENABLE + FORCE ROW LEVEL SECURITY) com employee_balance_debts_select_policy e employee_balance_debts_manage_policy
+-- 7. Trigger de Auditoria Forense T29 (audit_employee_balance_debts_trigger -> audit.audit_trigger_func())
+-- 8. Atualização da RPC public.close_payroll_period para baixa de parcelas de empréstimo e quitação/geração de saldo devedor.
+```
+
+---
+
+## 36. Migration `0023_benefits_enterprise_vt_ans_copay.sql` (FASE V5 / FOLHA-08 — Benefícios Enterprise: Teto Legal VT Lei 7.418/85, Planos de Saúde/Odonto ANS e Coparticipação CSV)
+
+Aplicada e validada em PostgreSQL 17 puro (`couplerh-db` e `couplerh-test-db`):
+
+```sql
+-- 1. Rubricas Oficiais do Sistema para Benefícios e Coparticipação
+-- Rubricas: 905 (VT 6% Lei 7.418/85), 907 (Saúde Titular), 908 (Saúde Dependentes),
+-- 909 (Coparticipação Saúde), 910 (Odonto Titular), 911 (Coparticipação Odonto), 912 (PAT Refeição/Alimentação).
+-- Todas configuradas com discount_priority = 50 (Fila Legal de Benefícios).
+
+-- 2. Enriquecimento de public.benefit_catalogs com ANS, CNPJ e Regras
+ALTER TABLE public.benefit_catalogs
+    ADD COLUMN IF NOT EXISTS ans_code VARCHAR(20),
+    ADD COLUMN IF NOT EXISTS provider_cnpj VARCHAR(18),
+    ADD COLUMN IF NOT EXISTS discount_rule VARCHAR(30) NOT NULL DEFAULT 'FIXED_VALUE'
+        CHECK (discount_rule IN ('FIXED_VALUE', 'PERCENTAGE', 'LEGAL_VT_6_PERCENT', 'TIERED', 'CUSTOM')),
+    ADD COLUMN IF NOT EXISTS pat_coverage VARCHAR(30) DEFAULT 'NONE'
+        CHECK (pat_coverage IN ('NONE', 'PAT_REGISTERED', 'EXEMPT'));
+
+-- 3. Enriquecimento de public.employee_benefits para VT, Teletrabalho e Custos de Titular
+ALTER TABLE public.employee_benefits
+    ADD COLUMN IF NOT EXISTS opt_in BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS work_regime VARCHAR(20) NOT NULL DEFAULT 'PRESENTIAL'
+        CHECK (work_regime IN ('PRESENTIAL', 'HYBRID', 'REMOTE')),
+    ADD COLUMN IF NOT EXISTS weekly_remote_days SMALLINT NOT NULL DEFAULT 0 CHECK (weekly_remote_days BETWEEN 0 AND 7),
+    ADD COLUMN IF NOT EXISTS daily_passes SMALLINT NOT NULL DEFAULT 2 CHECK (daily_passes >= 0),
+    ADD COLUMN IF NOT EXISTS pass_unit_value NUMERIC(10,2) NOT NULL DEFAULT 0.00 CHECK (pass_unit_value >= 0),
+    ADD COLUMN IF NOT EXISTS conceded_benefit_value NUMERIC(10,2) NOT NULL DEFAULT 0.00 CHECK (conceded_benefit_value >= 0),
+    ADD COLUMN IF NOT EXISTS holder_monthly_cost NUMERIC(10,2) NOT NULL DEFAULT 0.00 CHECK (holder_monthly_cost >= 0),
+    ADD COLUMN IF NOT EXISTS holder_discount_value NUMERIC(10,2) NOT NULL DEFAULT 0.00 CHECK (holder_discount_value >= 0),
+    ADD COLUMN IF NOT EXISTS company_subsidy_amount NUMERIC(10,2) NOT NULL DEFAULT 0.00 CHECK (company_subsidy_amount >= 0),
+    ADD COLUMN IF NOT EXISTS notes TEXT;
+
+-- 4. Dependentes de Planos de Saúde e Odontológicos (public.employee_benefit_dependents)
+CREATE TABLE IF NOT EXISTS public.employee_benefit_dependents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    employee_benefit_id UUID NOT NULL REFERENCES public.employee_benefits(id) ON DELETE CASCADE,
+    contract_id UUID NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
+    dependent_name VARCHAR(200) NOT NULL,
+    dependent_cpf VARCHAR(14),
+    relationship VARCHAR(30) NOT NULL CHECK (relationship IN ('SPOUSE', 'CHILD', 'STEPCHILD', 'PARENT', 'OTHER')),
+    birth_date DATE,
+    ans_card_number VARCHAR(50),
+    monthly_cost NUMERIC(10,2) NOT NULL DEFAULT 0.00 CHECK (monthly_cost >= 0),
+    employee_discount NUMERIC(10,2) NOT NULL DEFAULT 0.00 CHECK (employee_discount >= 0),
+    company_subsidy NUMERIC(10,2) NOT NULL DEFAULT 0.00 CHECK (company_subsidy >= 0),
+    start_date DATE NOT NULL,
+    end_date DATE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ
+);
+
+-- 5. Lotes de Importação de Faturas Médicas (public.benefit_import_batches)
+CREATE TABLE IF NOT EXISTS public.benefit_import_batches (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    payroll_period_id UUID NOT NULL REFERENCES public.payroll_periods(id) ON DELETE CASCADE,
+    benefit_catalog_id UUID REFERENCES public.benefit_catalogs(id) ON DELETE SET NULL,
+    benefit_type VARCHAR(50) NOT NULL,
+    filename VARCHAR(255) NOT NULL,
+    total_records INTEGER NOT NULL DEFAULT 0,
+    valid_records INTEGER NOT NULL DEFAULT 0,
+    error_records INTEGER NOT NULL DEFAULT 0,
+    total_amount NUMERIC(15,2) NOT NULL DEFAULT 0.00,
+    status VARCHAR(20) NOT NULL DEFAULT 'PROCESSED' CHECK (status IN ('PROCESSING', 'PROCESSED', 'FAILED', 'CANCELLED')),
+    imported_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+    error_summary JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ
+);
+
+-- 6. Detalhes de Coparticipação Médica/Odonto (public.benefit_copayments)
+CREATE TABLE IF NOT EXISTS public.benefit_copayments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    batch_id UUID REFERENCES public.benefit_import_batches(id) ON DELETE SET NULL,
+    payroll_period_id UUID NOT NULL REFERENCES public.payroll_periods(id) ON DELETE CASCADE,
+    contract_id UUID NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
+    worker_id UUID NOT NULL REFERENCES public.workers(id) ON DELETE CASCADE,
+    benefit_type VARCHAR(50) NOT NULL DEFAULT 'HEALTH_PLAN',
+    patient_name VARCHAR(200) NOT NULL,
+    patient_type VARCHAR(20) NOT NULL DEFAULT 'HOLDER' CHECK (patient_type IN ('HOLDER', 'DEPENDENT')),
+    event_date DATE NOT NULL,
+    procedure_code VARCHAR(50),
+    procedure_description TEXT,
+    original_invoice_number VARCHAR(100),
+    copay_amount NUMERIC(12,2) NOT NULL CHECK (copay_amount >= 0),
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'DEDUCTED', 'CANCELLED')),
+    payslip_id UUID REFERENCES public.payslips(id) ON DELETE SET NULL,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ
+);
+
+-- 7. RLS estrita (ENABLE + FORCE ROW LEVEL SECURITY) aplicada em employee_benefit_dependents, benefit_import_batches e benefit_copayments.
+-- 8. Triggers de Auditoria Forense T29 (audit.audit_trigger_func()) instalados em todas as tabelas de benefícios.
+```
+
+## 37. Migration `0024_unions_and_collective_agreements.sql` (FASE V5 / FOLHA-09 — Sindicatos e Convenções Coletivas CCT: Pisos, ATS e Bases Diferenciadas)
+
+Aplicada e validada em PostgreSQL 17 puro (`couplerh-db` e `couplerh-test-db`):
+
+```sql
+-- 1. Permissão RBAC manage_unions
+INSERT INTO public.permissions (name, description, module)
+VALUES ('manage_unions', 'Permite cadastrar, visualizar e gerenciar sindicatos e convenções coletivas (CCT)', 'payroll')
+ON CONFLICT (name) DO NOTHING;
+
+-- Vinculada aos papéis: system_admin, tenant_admin, dp_analyst
+
+-- 2. Rubricas Oficiais do Sistema para CCT
+-- 106: Adicional por Tempo de Serviço (ATS - Anuênio/Bienio/Triênio/Quinquênio) - INCIDE INSS, IRRF, FGTS
+-- 107: Diferença de Piso Salarial CCT (Complemento de Categoria) - INCIDE INSS, IRRF, FGTS
+
+-- 3. Tabela de Sindicatos (public.unions)
+CREATE TABLE IF NOT EXISTS public.unions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    code VARCHAR(50),
+    name VARCHAR(255) NOT NULL,
+    cnpj VARCHAR(18),
+    trade_name VARCHAR(255),
+    union_type VARCHAR(30) NOT NULL DEFAULT 'EMPLOYEE' CHECK (union_type IN ('EMPLOYEE', 'EMPLOYER')),
+    base_state VARCHAR(2),
+    base_city VARCHAR(100),
+    main_activity TEXT,
+    contact_name VARCHAR(150),
+    contact_email VARCHAR(150),
+    contact_phone VARCHAR(50),
+    website VARCHAR(255),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ
+);
+
+-- 4. Tabela de Convenções Coletivas / CCTs (public.collective_agreements)
+CREATE TABLE IF NOT EXISTS public.collective_agreements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    union_id UUID NOT NULL REFERENCES public.unions(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    base_date_month SMALLINT NOT NULL CHECK (base_date_month BETWEEN 1 AND 12),
+    validity_start DATE NOT NULL,
+    validity_end DATE NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'EXPIRED', 'SUSPENDED')),
+    floor_salary NUMERIC(12,2) NOT NULL DEFAULT 0.00 CHECK (floor_salary >= 0),
+    positions_overrides JSONB DEFAULT '{}'::jsonb,
+    overtime_rates JSONB DEFAULT '[{"limit_hours": 2, "percentage": 50}, {"limit_hours": 999, "percentage": 100}]'::jsonb,
+    night_shift_percentage NUMERIC(5,2) NOT NULL DEFAULT 20.00 CHECK (night_shift_percentage >= 0),
+    night_shift_start_time VARCHAR(5) NOT NULL DEFAULT '22:00',
+    night_shift_end_time VARCHAR(5) NOT NULL DEFAULT '05:00',
+    unhealthiness_base VARCHAR(30) NOT NULL DEFAULT 'MINIMUM_WAGE' CHECK (unhealthiness_base IN ('MINIMUM_WAGE', 'BASE_SALARY', 'CATEGORY_FLOOR')),
+    service_time_type VARCHAR(30) NOT NULL DEFAULT 'NONE' CHECK (service_time_type IN ('NONE', 'ANUENIO', 'BIENIO', 'TRIENIO', 'QUINQUENIO')),
+    service_time_percentage NUMERIC(5,2) NOT NULL DEFAULT 0.00 CHECK (service_time_percentage >= 0),
+    service_time_max_percentage NUMERIC(5,2) NOT NULL DEFAULT 0.00 CHECK (service_time_max_percentage >= 0),
+    average_rules JSONB DEFAULT '{"vacation_window_months": 12, "thirteenth_window_months": 12, "termination_window_months": 12}'::jsonb,
+    post_vacation_stability_days INTEGER NOT NULL DEFAULT 0 CHECK (post_vacation_stability_days >= 0),
+    document_file_id UUID REFERENCES public.stored_files(id) ON DELETE SET NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ
+);
+
+-- 5. Vínculo em public.contracts
+ALTER TABLE public.contracts
+    ADD COLUMN IF NOT EXISTS union_id UUID REFERENCES public.unions(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS collective_agreement_id UUID REFERENCES public.collective_agreements(id) ON DELETE SET NULL;
+
+-- 6. RLS estrita (ENABLE + FORCE ROW LEVEL SECURITY) aplicada em public.unions e public.collective_agreements.
+-- 7. Triggers de Auditoria Forense T29 (audit.audit_trigger_func()) instalados em public.unions e public.collective_agreements.
+```
+
+---
+
+### Migration `0025_averages_engine_and_rubric_flags.sql` — FASE V6 (`FOLHA-10`: Motor de Médias Configurável por CCT)
+- **`public.rubrics`**: Adicionadas colunas `average_type` (`'NONE' | 'HOURS_QUANTITY' | 'MONETARY_VALUE' | 'MONETARY_INDEXED'`), `include_in_vacation_avg`, `include_in_13th_avg`, `include_in_notice_avg`; atualizadas rubricas de sistema de HE/noturno (`102`, `103`, `160`, `301`) como `'HOURS_QUANTITY'` e DSR/comissões (`401`, `402`) como `'MONETARY_VALUE'`.
+- **`public.collective_agreements`**: Adicionadas colunas `average_window_mode` (`'ACQUISITIVE_OR_12M' | 'LAST_12M' | 'LAST_6M' | 'BEST_OF_6M_OR_12M' | 'CALENDAR_YEAR'`) e `average_monetary_index_rate NUMERIC(8,6)`.
+
+### Migration `0026_enterprise_vacations_collective_and_double.sql` — FASE V6 (`FOLHA-11`: Férias Enterprise & Coletivas)
+- **`public.collective_vacation_batches`**: Nova tabela para lotes de férias coletivas por empresa/departamento (`start_date`, `end_date`, `days_count`, `notice_date`, `status`, `created_by`), com `ENABLE` + `FORCE ROW LEVEL SECURITY`, `GRANT SELECT, INSERT, UPDATE, DELETE TO couplerh_app` e trigger `audit.audit_trigger_func()`.
+- **`public.vacation_schedules`**: Adicionadas colunas `is_collective`, `collective_batch_id` (FK para `collective_vacation_batches`), `double_vacation_days`, `averages_amount`, `split_months_json`, `validation_warnings`.
+- **Rubricas Oficiais**: `705` (*Férias em Dobro - Indenizatória Art. 137*), `706` (*1/3 sobre Férias em Dobro*) com incidências isentas de INSS/IRRF/FGTS, e `707` (*Médias de Variáveis sobre Férias*).
+
+### Migration `0027_thirteenth_complementary_and_rubrics.sql` — FASE V6 (`FOLHA-12`: 13º Salário Complementar)
+- **`public.payroll_periods`**: Atualizada constraint `payroll_periods_type_check` incluindo `'THIRTEENTH_COMPLEMENTARY'`.
+- **Rubricas Oficiais**: `604` (*Médias de Variáveis sobre 13º Salário*), `605` (*Diferença Positiva 13º Complementar Janeiro*) e `606` (*Ajuste Devedor 13º Complementar Janeiro*).
+
+### Migration `0028_unified_termination_and_complementary.sql` — FASE V6 (`FOLHA-13`: Motor Unificado de Rescisão + Rescisão Complementar)
+- **`public.terminations`**: Atualizada check constraint de `notice_type` para incluir `'MIXED'` (NT 184/2012 MTE) e adicionadas colunas `payroll_period_id`, `payslip_id`, `parent_termination_id`, `is_complementary`, `complementary_reason`, `notice_worked_days`, `notice_indemnified_days`, `esocial_reason_code`, `art_477_cap_applied`, `fgts_balance_real`.
+- **Rubricas Oficiais**: Cadastros `510`–`590` mapeando todas as verbas rescisórias do TRCT (`510` Saldo de Salário, `511` Aviso Indenizado, `512` 13º Proporcional, `513` 13º Aviso, `514` Férias Vencidas, `515` Férias Proporcionais, `516` 1/3 Férias, `517` Férias em Dobro, `518` Indenização Art. 9º, `519` Quitação Banco de Horas, `520` Indenização Art. 479, `521` Salário-Família Rescisão, `580`–`583`, `590`).
+
+### Migration `0029_retroactive_dissidio_and_rra.sql` — FASE V6 (`FOLHA-14`: Dissídio Retroativo & RRA)
+- **`public.retroactive_adjustments`**: Nova tabela de negociações/reajustes retroativos por empresa/sindicato/CCT (`adjustment_type`, `percentage`, `fixed_table_json`, `start_year`/`start_month`, `end_year`/`end_month`, `payment_year`/`payment_month`, `installments_count`, `apply_rra`, `esocial_tp_ac_conv`, `agreement_signature_date`, `summary_json`).
+- **`public.payslip_retroactive_breakdown`**: Nova tabela analítica mês a mês e por rubrica vinculada ao holerite complementar com flag `is_prior_calendar_year` e payload `esocial_ide_adc_json`.
+- Ambas as tabelas com `ENABLE` + `FORCE ROW LEVEL SECURITY`, `GRANT` para `couplerh_app` e trigger `audit.audit_trigger_func()`.
+- **Rubricas Oficiais**: `110` (*Diferença Salarial Retroativa*, `rubric_kind = 'OTHER'`), `111` (*Diferença Reflexos Retroativos*), `112` (*Diferença Retroativa Férias/13º*) e `915` (*IRRF sobre RRA Art. 12-A*).
+
+### Migration `0030_multi_regime_esocial_and_intermittent.sql` — FASE V6 (`FOLHA-15`: Multi-Regime eSocial)
+- **`public.contract_types` & `public.contracts`**: Adicionados `esocial_category_code`, `calculation_regime` (`'CLT' | 'PRO_LABORE' | 'AUTONOMOUS_RPA' | 'INTERN' | 'INTERMITTENT' | 'HOURLY' | 'DAILY' | 'COMMISSION_ONLY' | 'APPRENTICE'`), `autonomous_service_type` (`'GENERAL' | 'FREIGHT_TRANSPORT' | 'PASSENGER_TRANSPORT'`), `iss_rate`, `hourly_rate`, `daily_rate` e flags patronais por tipo.
+- **`public.intermittent_calls`**: Nova tabela para convocações de trabalho intermitente CLT Art. 452-A / S-2260, protegida com `ENABLE` + `FORCE ROW LEVEL SECURITY` e trigger T29.
+- **Rubricas Oficiais**: `115` Pró-Labore, `116` Autônomo/RPA, `117` Bolsa Estágio, `118` Recesso Estágio, `119` Salário Intermitente, `120` Férias Prop.+1/3 Intermitente, `121` 13º Prop. Intermitente, `122` DSR Intermitente, `123` Garantia Mínima Comissionista (`rubric_kind = 'OTHER'`), `916` Desconto SEST/SENAT (2,5%) e `917` Desconto ISS Autônomo.
+
+### Migration `0031_advanced_employer_taxes_cprb_rat_special.sql` — FASE V6 (`FOLHA-16`: Encargos Patronais Avançados)
+- **`public.companies`**: Adicionadas colunas `cprb_gross_revenue_exempt`, `cprb_gross_revenue_total` e `cprb_reoneration_year`.
+- **`public.contracts`**: Adicionada coluna `special_retirement_exposure_code` (`'01' | '02' | '03' | '04'`, default `'01'`).
+- **`public.payroll_company_taxes`**: Adicionadas colunas `inss_patronal_pro_labore`, `rat_special_retirement_amount`, `cprb_reduction_ratio`, `cprb_effective_cpp_rate` e `breakdown_json`.
+- **`public.save_payroll_period(UUID, JSONB)`**: Atualizada para persistir os novos campos de `payroll_company_taxes` preservando integralmente todos os campos da folha V4/V5 (`legal_version_id`, `payslip_items.rubric_version_id`, `maternity_deduction`, `family_salary_deduction`, `ind_mv`, `consignable_loan_capped`, etc.).
+
+### Migration `0032_cost_allocations_and_cno_tomadores.sql` — FASE V7 (`CONT-01`: Rateio Multi-CC, Projetos, Tomadores e Obras CNO)
+- **`public.cost_centers`**: Adicionadas colunas `allocation_type` (`'COST_CENTER' | 'PROJECT' | 'TOMADOR' | 'CNO_WORK'`), `project_code`, `tomador_cnpj`, `tomador_name`, `cno_number`, `esocial_lotacao_code`, `esocial_tp_lotacao`.
+- **`public.contract_cost_allocations`**: Regras de rateio por contrato (`percentage NUMERIC(7,4)`, índices `(tenant_id, contract_id, is_active)`), com soma validada em 100%.
+- **`public.payslip_cost_allocations`**: Rateio analítico por holerite na competência (`gross_amount`, `deductions_amount`, `net_amount`, `inss_employer_amount`, `rat_amount`, `terceiros_amount`, `fgts_amount`, `vacation_provision_amount`, `thirteenth_provision_amount`, `total_employer_cost`, `is_rounding_adjusted`), índice `(tenant_id, payroll_period_id, payslip_id)`.
+- Ambas as tabelas protegidas por `ENABLE` + `FORCE ROW LEVEL SECURITY`, `GRANT SELECT, INSERT, UPDATE, DELETE TO couplerh_app` e triggers T29 `audit.audit_trigger_func()`.
+
+### Migration `0033_accounting_provisions_ledger.sql` — FASE V7 (`CONT-02`: Razão Contábil de Provisões Reais Acumuladas)
+- **`public.accounting_provisions_ledger`**: Razão mensal acumulado por `provision_type` (`'VACATION' | 'THIRTEENTH'`) e contrato (`opening_balance`, `monthly_accrual`, `salary_adjustment_diff`, `averages_adjustment`, `settlements_paid`, `closing_balance`, encargos correspondentes `charges_*`, `net_accounting_entry`, `net_charges_entry`, `effective_employer_rate`, `avos_accumulated`, `breakdown_json`), constraint `UNIQUE (tenant_id, payroll_period_id, contract_id, provision_type)`, índices de competência/contrato, RLS `ENABLE`+`FORCE`, `GRANT TO couplerh_app` e trigger T29.
+
+### Migration `0034_accounting_chart_and_erp_rules.sql` — FASE V7 (`CONT-03`: Plano de Contas Parametrizável, Regras D/C e Lotes Exportadores ERP)
+- **`public.accounting_chart_of_accounts`**: Contas contábeis por tenant/empresa (`account_code`, `account_name`, `reduced_code`, `account_type`, `nature`, `requires_cost_center`, `is_system_default`) com índice único `(tenant_id, COALESCE(company_id, zero-uuid), account_code)`.
+- **`public.accounting_mapping_rules`**: Regras parametrizáveis (`rule_scope`, `rubric_code`, `event_key`, `debit_account_id`, `credit_account_id`, `history_template`, `erp_history_code`, `split_by_cost_center`, `priority`).
+- **`public.accounting_export_batches`**: Lotes exportados (`DOMINIO`, `ALTERDATA`, `PROTHEUS`, `SENIOR`, `CSV_CONFIGURABLE`) com `total_debit`, `total_credit`, `entries_count`, `is_balanced` e `file_hash_sha256`.
+- Todas protegidas com RLS `ENABLE`+`FORCE`, `GRANT TO couplerh_app` e triggers T29.
+
+### Migration `0035_cnab240_remittances_and_returns.sql` — FASE V7 (`CONT-04`: Remessas CNAB 240 Multi-Banco e Retorno `.ret`)
+- **`public.companies`**: Adicionadas colunas `payment_bank_code`, `payment_agency`, `payment_agency_digit`, `payment_account`, `payment_account_digit`, `payment_agreement_code`, `payment_pix_key`.
+- **`public.cnab_remittances`**: Cabeçalho da remessa (`bank_code`, `payment_channel`, `employees_count`, `alimony_count`, `total_amount`, `file_content`, `file_hash_sha256`, `status`).
+- **`public.cnab_remittance_items`**: Itens individuais para `EMPLOYEE` e `ALIMONY` (`payslip_alimony_splits`), chave `your_number` e status bancário (`PENDING | PAID | REJECTED | RETURNED`).
+- **`public.cnab_return_imports`**: Lotes de retorno `.ret` conciliados (`file_hash_sha256`, `paid_count`, `rejected_count`, `summary_json`).
+- Todas protegidas com RLS `ENABLE`+`FORCE`, `GRANT TO couplerh_app` e triggers T29.
+
+### Migration `0036_income_reports_and_tax_reconciliation.sql` — FASE V7 (`CONT-05`: Conciliação DCTFWeb / FGTS Digital / DARF IRRF)
+- **`public.tax_reconciliation_snapshots`**: Confronto por competência e guia (`'DCTFWEB' | 'FGTS_DIGITAL' | 'IRRF_DARF'`) com `engine_base_amount`, `engine_tax_amount`, `declared_base_amount`, `declared_tax_amount`, `diff_amount`, `status` (`'MATCHED' | 'DIVERGENT' | 'PENDING_DECLARATION'`), constraint `UNIQUE (tenant_id, payroll_period_id, source_type)`, RLS `ENABLE`+`FORCE`, `GRANT TO couplerh_app` e trigger T29.
+
+### Migration `0037_ponto_enterprise_geofence_antispoofing.sql` — FASE V8 (`PONTO-01` a `PONTO-04`: Anti-Spoofing GPS, Multi-Geofence, PWA Offline & LGPD)
+- **`public.workplaces`**: Adicionadas colunas `max_accuracy_meters` (`DEFAULT 150.0`) e `allow_external_audit` (`DEFAULT false`).
+- **`public.contract_allowed_workplaces`**: Vínculo N:N entre contratos e locais permitidos (`tenant_id`, `contract_id`, `workplace_id`, `is_primary`, `allow_external_audit`), `UNIQUE (contract_id, workplace_id)`, RLS `ENABLE`+`FORCE`, `GRANT TO couplerh_app` e trigger T29.
+- **`public.time_punch_records`**: Evoluída com `receipt_code` (`UNIQUE`), `device_timestamp`, `server_received_at`, `sync_origin` (`WEB_ONLINE | OFFLINE_PWA | MOBILE_LEGACY | REP_P`), `distance_meters`, `speed_kmh`, `fraud_flags` (`TEXT[]`), `selfie_file_id` (FK `stored_files`) e `client_uuid` (índice único para idempotência offline).
+- **`public.stored_files`**: Constraint `stored_files_category_check` expandida com `'PUNCH_SELFIE'` e `'MEDICAL_CERTIFICATE'`.
+- **`public.lgpd_consents` e `public.lgpd_subject_requests`**: Criadas para gestão de consentimento LGPD (ex.: `BIOMETRIC_SELFIE`) e solicitações do titular (`ACCESS | CORRECTION | PORTABILITY | DELETION`), com RLS `ENABLE`+`FORCE`, `GRANT TO couplerh_app` e triggers T29.
+- **Funções SQL**: Atualizada `public.verify_public_punch(TEXT)` retornando apenas dados públicos sem CPF; recriada `public.get_my_lgpd_dossier()` corrigindo joins para `positions.title` e `contracts.base_salary`.
+
+### Migration `0038_multilevel_approvals_and_portal2.sql` — FASE V8 (`PONTO-05` e `PONTO-06`: Portal 2.0 & Aprovação Multinível Gestor → DP)
+- **`public.time_punch_adjustments`**: Constraint de tipo expandida para incluir `'MEDICAL_CERTIFICATE' | 'TIME_BANK_DAY_OFF' | 'WORK_SCHEDULE_CHANGE'`; fluxo de aprovação multinível (`'PENDING_MANAGER' | 'APPROVED_MANAGER' | 'REJECTED_MANAGER' | 'APPROVED_DP' | 'REJECTED_DP'`) com colunas `end_date`, `requested_minutes`, `cid10_code`, `doctor_crm`, `manager_decided_by`, `manager_decided_at`, `manager_notes`, `dp_decided_by`, `dp_decided_at`, `dp_notes` e RLS para colaborador/gestor/DP.
+- **`public.vacation_schedules`**: Evoluída com aprovação multinível do gestor (`manager_decided_by`, `manager_decided_at`, `manager_notes`) e status `'PENDING_MANAGER' | 'APPROVED_MANAGER' | 'REJECTED_MANAGER'` + RLS atualizada.
+- **`public.timesheet_closures`**: Assinatura digital / contestação mensal do espelho de ponto por contrato e competência (`status`, `signed_at`, `signature_hash`, `contested_reason`, `ip_address`) com `UNIQUE (contract_id, period_month, period_year)`, RLS `ENABLE`+`FORCE`, `GRANT TO couplerh_app` e trigger T29.
+
+### Migration `0039_advanced_workshift_rules_and_rubrics.sql` — FASE V8 (`PONTO-07`: HE Noturna OJ 97, Sobreaviso, Prontidão, Escalas Rotativas e Banco Negativo)
+- **`public.work_shifts`**: Expandidos tipos para incluir escalas rotativas (`ROTATING_12X36`, `ROTATING_5X1`, `ROTATING_6X1`, `ROTATING_6X2`, `ROTATING_4X2`, `ROTATING_24X48`), `rotation_pattern_json`, `rotation_anchor_date`, `night_start_hour`, `night_end_hour` e `night_extended_prorrogation`.
+- **`public.collective_agreements`**: Adicionadas políticas de banco de horas negativo (`time_bank_allow_negative`, `time_bank_max_negative_minutes`, `time_bank_negative_deduction_rule`) e `overtime_night_oj97_enabled`.
+- **`public.time_punch_daily_summaries`**: Adicionadas colunas `night_overtime_50_hours`, `night_overtime_100_hours`, `standby_hours`, `readiness_hours` e `inconsistencies_json`.
+- **Rubricas de Sistema (`public.payroll_rubrics`)**: Inseridas rubricas globais `108` (`Hora Extra Noturna 50% OJ 97`), `109` (`Hora Extra Noturna 100% OJ 97`), `124` (`Sobreaviso 1/3`) e `125` (`Prontidão 2/3`) via `ON CONFLICT DO NOTHING`.
+
+### Migration `0040_esocial_vault_events_and_batches.sql` — FASE V9 (`ESOC-01` a `ESOC-03`: Cofre A1, Eventos e Lotes)
+- **`public.esocial_certificates`**: Cofre de certificados digitais A1 criptografado com envelope AES-256-GCM (`encrypted_pfx_envelope`, `thumbprint_sha256`, `serial_number`, `issuer_dn`, `cnpj`, `environment`, `revoked_at`, `last_expiry_alert_tier`).
+- **`public.esocial_batches`**: Lotes SOAP mTLS para transmissão ao SERPRO/Gov.br (`protocol_number`, `group_type`, `attempt_count`, `next_retry_at`, `cd_resposta`, `desc_resposta`).
+- **`public.esocial_events`**: Eventos do eSocial com suporte a layouts S-1.2/S-1.3 (`layout_version`, `xsd_valid`, `xsd_errors`, `signature_digest`, `signed_at`, `receipt_xml`, `status`).
+
+### Migration `0041_esocial_totalizers_and_homologation.sql` — FASE V9 (`ESOC-04` e `ESOC-05`: Totalizadores e Homologação)
+- **`public.esocial_totalizers`**: Totalizadores oficiais do Governo vs Motor CoupleRH (`S-5001` a `S-5013`) com diferenças em centavos.
+- **`public.esocial_homologation_cycles`**: Histórico e validação de ciclos em ambiente de Homologação.
+- **`public.companies`**: Flags `esocial_production_enabled` e `esocial_homologated_at`.
+
+### Migration `0042_esocial_cert_expiry_cron_helper.sql` — FASE V9 (`ESOC-01`: Funções de Alerta de Vencimento A1)
+- Funções `SECURITY DEFINER` `public.esocial_list_expiring_certificates` e `public.esocial_mark_certificate_alert_tier` para monitoramento automático de validade de certificados digitais A1.
+
+### Migration `0043_thirteenth_single_and_first_installment_averages.sql` — FASE V9.5 (`IMP-01`: 13º Salário Parcela Única e Médias na 1ª Parcela)
+- **`public.payroll_periods`**: Constraint `payroll_periods_type_check` atualizada para aceitar o valor `'THIRTEENTH_SINGLE'` (Parcela Única do 13º Salário, paga em novembro com projeção de 12 avos e tributação exclusiva na fonte).
+- **`public.collective_agreements`**: Adicionada a coluna `include_averages_in_13th_first_installment BOOLEAN NOT NULL DEFAULT TRUE` para controle CCT da incidência de 50% das médias variáveis na 1ª parcela do 13º salário.
+- Ambas com integridade mantida, RLS ativa e concessões para `couplerh_app`.
+
+### Migration `0044_thirteenth_work_accident_sumula_46.sql` — FASE V9.5 (Súmula nº 46 do TST: Complementação 13º Salário por Acidente de Trabalho)
+- **`public.leaves`**: Adicionada a coluna `inss_annual_bonus_amount NUMERIC(15,2) DEFAULT NULL` para registro opcional do valor do Abono Anual de 13º pago pelo INSS durante o período em gozo de auxílio acidentário (B91 / código eSocial `01`).
+- **`public.rubrics`**: Inseridas as rubricas de sistema:
+  - `607` (`Complemento 13º Salário Acidente de Trabalho (Súmula 46 TST)`): Provento `EARNING`, categoria `THIRTEENTH`, com incidências tributárias completas de 13º (`inss`, `irrf`, `fgts`, `inss_patronal`, `rat`, `terceiros`, `irrf_mode = 'EXCLUSIVO'`).
+  - `609` (`Abono Anual INSS - Acidente de Trabalho`): Provento informativo `EARNING`, categoria `OTHER`, sem incidências fiscais, utilizado para informar em folha o montante pago pelo INSS para cálculo automático da complementação: $\max(0, \text{13º Integral} - \text{13º Empresa} - \text{Abono INSS})$.
+
+### Migration `0045_notifications_and_alerts_engine.sql` — FASE V10 (`ENT-01`: Motor Real de Notificações, Alertas e Sininho no Header)
+- **`public.user_notifications`**: Tabela central de notificações e alertas operacionais para os usuários do sistema (`id UUID PRIMARY KEY`, `tenant_id UUID REFERENCES tenants`, `user_id UUID REFERENCES users`, `type VARCHAR(50)`, `title VARCHAR(255)`, `message TEXT`, `link VARCHAR(255)`, `severity VARCHAR(20) CHECK (severity IN ('INFO', 'WARNING', 'DANGER', 'CRITICAL', 'SUCCESS'))`, `is_read BOOLEAN DEFAULT false`, `read_at TIMESTAMPTZ`, `metadata JSONB DEFAULT '{}'::jsonb`, `created_at TIMESTAMPTZ`, `updated_at TIMESTAMPTZ`).
+- Índices de alto desempenho: `idx_user_notifications_unread (tenant_id, user_id, is_read, created_at DESC)`, `idx_user_notifications_tenant`.
+- Habilitada e forçada com `ENABLE ROW LEVEL SECURITY` e `FORCE ROW LEVEL SECURITY`.
+- Política `tenant_isolation_user_notifications` isolando estritamente por `tenant_id = public.current_app_tenant_id()` e acesso apenas do próprio usuário ou administrador.
+- Concessão de permissões `SELECT, INSERT, UPDATE, DELETE` para a role `couplerh_app` e trigger de auditoria imutável T29 `audit.audit_trigger_func()`.
+
+### Migration `0046_digital_admissions_self_service.sql` — FASE V10 (`ENT-03`: Admissão Digital Self-Service)
+- **`public.admission_invites`**: Tabela de convites tokenizados gerados pelo DP (`id UUID PRIMARY KEY`, `tenant_id UUID REFERENCES tenants`, `company_id UUID REFERENCES companies`, `invite_token VARCHAR(64) UNIQUE`, `candidate_name VARCHAR(255)`, `candidate_email VARCHAR(255)`, `candidate_phone VARCHAR(30)`, `candidate_cpf VARCHAR(14)`, `position_id UUID REFERENCES positions`, `department_id UUID REFERENCES departments`, `proposed_salary_cents BIGINT`, `hire_date DATE`, `status VARCHAR(30) CHECK (status IN ('PENDING', 'SUBMITTED', 'APPROVED', 'REJECTED', 'EXPIRED', 'CANCELLED'))`, `expires_at TIMESTAMPTZ`, `created_by UUID REFERENCES users`, `created_at TIMESTAMPTZ`, `updated_at TIMESTAMPTZ`).
+- **`public.admission_submissions`**: Tabela com os dados e formulários preenchidos e assinados pelo candidato (`id UUID PRIMARY KEY`, `invite_id UUID UNIQUE REFERENCES admission_invites`, `tenant_id UUID REFERENCES tenants`, `personal_data JSONB`, `address_data JSONB`, `bank_data JSONB`, `dependents_data JSONB`, `transport_option JSONB`, `time_bank_agreement BOOLEAN`, `document_file_ids JSONB`, `lgpd_consent BOOLEAN`, `lgpd_consent_text TEXT`, `signature_svg TEXT`, `signature_ip VARCHAR(45)`, `signature_user_agent TEXT`, `submitted_at TIMESTAMPTZ`, `reviewed_by UUID REFERENCES users`, `reviewed_at TIMESTAMPTZ`, `review_notes TEXT`, `worker_id UUID REFERENCES workers`, `contract_id UUID REFERENCES contracts`).
+- Ambas as tabelas protegidas por `ENABLE` + `FORCE ROW LEVEL SECURITY`, políticas de isolamento por `tenant_id = public.current_app_tenant_id()`, privilégios concedidos à role `couplerh_app` e triggers de auditoria imutável T29 `audit.audit_trigger_func()`.
+

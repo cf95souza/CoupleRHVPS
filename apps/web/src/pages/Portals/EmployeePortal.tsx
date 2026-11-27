@@ -28,9 +28,11 @@ import {
   Check,
   PenTool,
   TrendingUp,
+  Stethoscope,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../../lib/apiClient";
+import { pontoEnterpriseService } from "../../services/timeTracking/pontoEnterpriseService";
 import { toast } from 'sonner';
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -159,12 +161,16 @@ function formatPunchTime(dateStr: string | null | undefined): string {
 
 function formatPunchTypeLabel(type: string): string {
   const map: Record<string, string> = {
+    IN: "Entrada",
     ENTRY: "Entrada",
+    BREAK_START: "Saída Almoço",
     INTERVAL_START: "Saída Almoço",
+    BREAK_END: "Retorno Almoço",
     INTERVAL_END: "Retorno Almoço",
+    OUT: "Saída",
     EXIT: "Saída",
   };
-  return map[type] || type;
+  return map[String(type || "").toUpperCase()] || type;
 }
 
 function benefitTypeLabel(type: string): string {
@@ -173,11 +179,15 @@ function benefitTypeLabel(type: string): string {
     VR: "Vale Refeição",
     VA: "Vale Alimentação",
     HEALTH: "Plano de Saúde",
+    HEALTH_PLAN: "Plano de Saúde",
     DENTAL: "Plano Odontológico",
+    DENTAL_PLAN: "Plano Odontológico",
     GYM: "Academia",
     TRANSPORTATION: "Transporte",
     MEAL: "Refeição",
+    MEAL_VOUCHER: "Vale Refeição",
     FOOD: "Alimentação",
+    FOOD_VOUCHER: "Vale Alimentação",
     HEALTH_INSURANCE: "Plano de Saúde",
     DENTAL_INSURANCE: "Plano Odontológico",
     LIFE_INSURANCE: "Seguro de Vida",
@@ -192,6 +202,7 @@ function formatPayslipType(type: string): string {
     ADVANCE: "Adiantamento",
     THIRTEENTH_1: "13º Primeira Parcela",
     THIRTEENTH_2: "13º Segunda Parcela",
+    THIRTEENTH_SINGLE: "13º Parcela Única",
     VACATION: "Férias",
     TERMINATION: "Rescisão"
   };
@@ -325,6 +336,18 @@ export default function EmployeePortal() {
   const [showLgpdModal, setShowLgpdModal] = useState(false);
   const [todayPunches, setTodayPunches] = useState<any[]>([]);
   const [timeBankSummary, setTimeBankSummary] = useState<any>(null);
+  const [portalSchedule, setPortalSchedule] = useState<any | null>(null);
+  const [portalBenefits, setPortalBenefits] = useState<any[]>([]);
+  const [portalJustifications, setPortalJustifications] = useState<any[]>([]);
+  const [showJustificationModal, setShowJustificationModal] = useState(false);
+  const [justType, setJustType] = useState<'JUSTIFY_ABSENCE' | 'MEDICAL_CERTIFICATE' | 'INSERT_PUNCH'>('MEDICAL_CERTIFICATE');
+  const [justDate, setJustDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [justEndDate, setJustEndDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [justText, setJustText] = useState('');
+  const [justCid, setJustCid] = useState('');
+  const [justCrm, setJustCrm] = useState('');
+  const [justFile, setJustFile] = useState<{ name: string; mime: string; base64: string } | null>(null);
+  const [justSubmitting, setJustSubmitting] = useState(false);
   const [companyData, setCompanyData] = useState<{ name: string; cnpj: string }>({
     name: 'CoupleRH Empregador',
     cnpj: '00.000.000/0001-00'
@@ -385,12 +408,20 @@ export default function EmployeePortal() {
         return [];
       })();
 
-      const [punches, bankRes] = await Promise.all([
+      const [punches, bankRes, apiTb, apiSched, apiBens, apiJusts] = await Promise.all([
         punchesPromise,
-        supabase.rpc("get_employee_time_bank", { p_contract_id: contractId })
+        supabase.rpc("get_employee_time_bank", { p_contract_id: contractId }),
+        pontoEnterpriseService.fetchPortalTimeBank().catch(() => null),
+        pontoEnterpriseService.fetchPortalSchedule(year, today.getMonth() + 1).catch(() => null),
+        pontoEnterpriseService.fetchPortalBenefits().catch(() => null),
+        pontoEnterpriseService.fetchPortalJustifications().catch(() => null),
       ]);
 
       setTodayPunches(punches || []);
+      if (apiSched) setPortalSchedule(apiSched);
+      if (apiBens) setPortalBenefits(apiBens);
+      if (apiJusts) setPortalJustifications(apiJusts);
+      if (apiTb?.account) setTimeBankSummary(apiTb.account);
 
       if (bankRes && !bankRes.error && bankRes.data) {
         setTimeBankSummary(bankRes.data);
@@ -1425,7 +1456,7 @@ export default function EmployeePortal() {
             </div>
 
             {/* ━━━━ Resumo de Férias ━━━━ */}
-            <div className="animate-fade-up stagger-3">
+            <div id="vacation-section" className="animate-fade-up stagger-3">
               <Section
                 title="Férias"
                 icon={<CalendarDays size={18} className="text-amber-600" />}
@@ -1519,6 +1550,100 @@ export default function EmployeePortal() {
                     <p className="text-sm text-slate-500">Nenhum período aquisitivo encontrado.</p>
                   </div>
                 )}
+              </Section>
+            </div>
+
+            {/* ━━━━ Calendário Visual da Escala/Turno, Benefícios e Atestados (PONTO-05) ━━━━ */}
+            <div className="animate-fade-up stagger-3 space-y-5">
+              <Section
+                title="Minha Escala & Justificativas / Atestados"
+                icon={<CalendarDays size={18} className="text-indigo-600" />}
+                headerAction={
+                  <button
+                    onClick={() => setShowJustificationModal(true)}
+                    className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-[11px] font-bold flex items-center gap-1 hover:bg-indigo-700"
+                  >
+                    <Stethoscope size={13} /> Enviar Atestado / Justificar
+                  </button>
+                }
+              >
+                <div className="pt-3 space-y-4">
+                  {portalSchedule?.days && portalSchedule.days.length > 0 ? (
+                    <>
+                      <p className="text-xs text-slate-500">
+                        Escala: <strong className="text-slate-800">{portalSchedule.shift?.name}</strong> (
+                        {portalSchedule.shift?.shift_type})
+                      </p>
+                      <div className="grid grid-cols-7 gap-1.5 text-center text-[11px]">
+                        {portalSchedule.days.map((d: any) => (
+                          <div
+                            key={d.date}
+                            title={`${d.label} ${d.expectedIn ? `(${d.expectedIn}-${d.expectedOut})` : ''}`}
+                            className={`p-1.5 rounded-lg border ${
+                              d.isHoliday
+                                ? 'bg-amber-50 border-amber-200 text-amber-800'
+                                : d.isWorkDay
+                                  ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                                  : 'bg-slate-50 border-slate-200 text-slate-400'
+                            }`}
+                          >
+                            <span className="font-bold block">{d.dayOfMonth}</span>
+                            <span className="text-[9px] truncate block">
+                              {d.isWorkDay ? d.expectedIn || 'Trab' : d.isHoliday ? 'Fer.' : 'Folga'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-xs text-slate-400">Escala mensal indisponível no momento.</p>
+                  )}
+
+                  {portalJustifications.length > 0 && (
+                    <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                      <p className="text-[11px] font-bold uppercase text-slate-400">Últimas Solicitações / Atestados</p>
+                      {portalJustifications.slice(0, 4).map((j: any) => (
+                        <div key={j.id} className="p-2.5 rounded-xl bg-slate-50 flex items-center justify-between text-xs">
+                          <span>
+                            <strong>{j.adjustment_type}</strong> · {String(j.work_date).slice(0, 10)} — {j.justification}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 text-[10px] font-bold">
+                            {j.status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </Section>
+
+              <Section
+                title="Meus Benefícios"
+                icon={<Heart size={18} className="text-rose-600" />}
+              >
+                <div className="pt-3 space-y-2">
+                  {(portalBenefits.length > 0 ? portalBenefits : benefits).length === 0 ? (
+                    <p className="text-xs text-slate-400 py-3 text-center">Nenhum benefício ativo vinculado ao contrato.</p>
+                  ) : (
+                    (portalBenefits.length > 0 ? portalBenefits : benefits).map((b: any, idx: number) => (
+                      <div key={b.id || idx} className="p-3 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2.5">
+                          {benefitIcon(b.benefit_type || b.type)}
+                          <div>
+                            <p className="font-bold text-slate-800">{b.benefit_name || b.name}</p>
+                            <p className="text-slate-500">
+                              {benefitTypeLabel(b.benefit_type || b.type)}
+                              {b.ans_code ? ` · ANS ${b.ans_code}` : ''}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="font-mono font-bold text-slate-700">
+                          {b.holder_discount_value ? `Desc. R$ ${Number(b.holder_discount_value).toFixed(2)}` : 'Ativo'}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
               </Section>
             </div>
 
@@ -2571,6 +2696,105 @@ export default function EmployeePortal() {
                 Confirmar Contestação
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Envio de Atestado Médico / Justificativa (PONTO-05) */}
+      {showJustificationModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-900">Enviar Atestado Médico ou Justificativa</h3>
+              <button onClick={() => setShowJustificationModal(false)} className="p-1.5 rounded-lg hover:bg-slate-100">
+                <X size={18} />
+              </button>
+            </div>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setJustSubmitting(true);
+                try {
+                  await pontoEnterpriseService.submitPortalJustification({
+                    adjustmentType: justType,
+                    workDate: justDate,
+                    endDate: justType === 'MEDICAL_CERTIFICATE' ? justEndDate : justDate,
+                    justification: justText,
+                    cid10Code: justType === 'MEDICAL_CERTIFICATE' ? justCid || undefined : undefined,
+                    doctorCrm: justType === 'MEDICAL_CERTIFICATE' ? justCrm || undefined : undefined,
+                    fileName: justFile?.name,
+                    mimeType: justFile?.mime as any,
+                    fileBase64: justFile?.base64,
+                  });
+                  toast.success('Solicitação enviada ao Gestor e DP!');
+                  setShowJustificationModal(false);
+                  setJustText('');
+                  setJustCid('');
+                  setJustCrm('');
+                  setJustFile(null);
+                  const refreshed = await pontoEnterpriseService.fetchPortalJustifications().catch(() => []);
+                  setPortalJustifications(refreshed);
+                } catch (err: any) {
+                  toast.error(err?.message || 'Erro ao enviar justificativa.');
+                } finally {
+                  setJustSubmitting(false);
+                }
+              }}
+              className="space-y-3 text-xs"
+            >
+              <select
+                value={justType}
+                onChange={(e) => setJustType(e.target.value as any)}
+                className="w-full p-2.5 rounded-xl border bg-white font-semibold"
+              >
+                <option value="MEDICAL_CERTIFICATE">Atestado Médico (Storage Privado)</option>
+                <option value="JUSTIFY_ABSENCE">Justificar Falta / Ausência</option>
+                <option value="INSERT_PUNCH">Ajuste / Esquecimento de Marcação</option>
+              </select>
+              <div className="grid grid-cols-2 gap-2">
+                <input type="date" value={justDate} onChange={(e) => setJustDate(e.target.value)} required className="p-2 rounded-xl border" />
+                {justType === 'MEDICAL_CERTIFICATE' && (
+                  <input type="date" value={justEndDate} onChange={(e) => setJustEndDate(e.target.value)} required className="p-2 rounded-xl border" />
+                )}
+              </div>
+              {justType === 'MEDICAL_CERTIFICATE' && (
+                <div className="grid grid-cols-2 gap-2">
+                  <input type="text" value={justCid} onChange={(e) => setJustCid(e.target.value)} placeholder="CID-10 (sigiloso)" className="p-2 rounded-xl border" />
+                  <input type="text" value={justCrm} onChange={(e) => setJustCrm(e.target.value)} placeholder="CRM Médico" className="p-2 rounded-xl border" />
+                </div>
+              )}
+              <textarea
+                rows={3}
+                value={justText}
+                onChange={(e) => setJustText(e.target.value)}
+                required
+                placeholder="Descreva o motivo..."
+                className="w-full p-2.5 rounded-xl border"
+              />
+              <div>
+                <label className="block font-semibold text-slate-600 mb-1">Anexo (PDF/PNG/JPG privado)</label>
+                <input
+                  type="file"
+                  accept="application/pdf,image/png,image/jpeg,image/webp"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      setJustFile({
+                        name: file.name,
+                        mime: file.type || 'application/pdf',
+                        base64: String(reader.result || ''),
+                      });
+                    };
+                    reader.readAsDataURL(file);
+                  }}
+                />
+              </div>
+              <button type="submit" disabled={justSubmitting} className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-bold">
+                {justSubmitting ? 'Enviando...' : 'Confirmar Envio'}
+              </button>
+            </form>
           </div>
         </div>
       )}

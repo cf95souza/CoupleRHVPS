@@ -20,6 +20,12 @@ export default function CompanyForm() {
     primary_cnae: "",
     legal_nature: "",
     status: "ACTIVE",
+    salary_payment_rule: "FIFTH_BUSINESS_DAY" as "FIFTH_BUSINESS_DAY" | "LAST_DAY_OF_MONTH",
+    withhold_irrf_on_advance: false,
+    is_cprb_exempted: false,
+    cprb_gross_revenue_total: "",
+    cprb_gross_revenue_exempt: "",
+    cprb_reoneration_year: "",
     fiscal_config_json: "",
     labor_config_json: "",
   });
@@ -51,6 +57,24 @@ export default function CompanyForm() {
           primary_cnae: data.primary_cnae || "",
           legal_nature: data.legal_nature || "",
           status: data.status || "ACTIVE",
+          salary_payment_rule:
+            data.labor_config?.salary_payment_rule === "LAST_DAY_OF_MONTH"
+              ? "LAST_DAY_OF_MONTH"
+              : "FIFTH_BUSINESS_DAY",
+          withhold_irrf_on_advance: Boolean(data.labor_config?.withhold_irrf_on_advance),
+          is_cprb_exempted: Boolean(data.labor_config?.is_cprb_exempted),
+          cprb_gross_revenue_total:
+            data.cprb_gross_revenue_total !== null && data.cprb_gross_revenue_total !== undefined
+              ? String(data.cprb_gross_revenue_total)
+              : "",
+          cprb_gross_revenue_exempt:
+            data.cprb_gross_revenue_exempt !== null && data.cprb_gross_revenue_exempt !== undefined
+              ? String(data.cprb_gross_revenue_exempt)
+              : "",
+          cprb_reoneration_year:
+            data.cprb_reoneration_year !== null && data.cprb_reoneration_year !== undefined
+              ? String(data.cprb_reoneration_year)
+              : "",
           fiscal_config_json: data.fiscal_config ? JSON.stringify(data.fiscal_config, null, 2) : "",
           labor_config_json: data.labor_config ? JSON.stringify(data.labor_config, null, 2) : "",
         });
@@ -85,6 +109,7 @@ export default function CompanyForm() {
         );
       }
 
+      const parsedLabor = formData.labor_config_json ? JSON.parse(formData.labor_config_json) : {};
       const payload = {
         tenant_id: tenantData.tenant_id,
         corporate_name: formData.corporate_name,
@@ -95,8 +120,22 @@ export default function CompanyForm() {
         primary_cnae: formData.primary_cnae,
         legal_nature: formData.legal_nature,
         status: formData.status,
+        cprb_gross_revenue_total: formData.cprb_gross_revenue_total
+          ? Number(formData.cprb_gross_revenue_total)
+          : 0,
+        cprb_gross_revenue_exempt: formData.cprb_gross_revenue_exempt
+          ? Number(formData.cprb_gross_revenue_exempt)
+          : 0,
+        cprb_reoneration_year: formData.cprb_reoneration_year
+          ? Number(formData.cprb_reoneration_year)
+          : null,
         fiscal_config: formData.fiscal_config_json ? JSON.parse(formData.fiscal_config_json) : {},
-        labor_config: formData.labor_config_json ? JSON.parse(formData.labor_config_json) : {},
+        labor_config: {
+          ...parsedLabor,
+          salary_payment_rule: formData.salary_payment_rule,
+          withhold_irrf_on_advance: formData.withhold_irrf_on_advance,
+          is_cprb_exempted: formData.is_cprb_exempted,
+        },
       };
 
       if (id) {
@@ -274,6 +313,137 @@ export default function CompanyForm() {
                   <option value="SUSPENDED">Suspenso</option>
                 </select>
               </div>
+            </div>
+
+            <div className="flex items-center gap-3 border-b border-slate-100 pb-4 mb-6 mt-8">
+              <h2 className="text-lg font-bold text-slate-800">
+                Política de Pagamento & IRRF (Regime de Caixa)
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              <div>
+                <label className="input-label">Regra Padrão de Pagamento da Folha Mensal</label>
+                <select
+                  className="input"
+                  value={formData.salary_payment_rule}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      salary_payment_rule: e.target.value as "FIFTH_BUSINESS_DAY" | "LAST_DAY_OF_MONTH",
+                    })
+                  }
+                >
+                  <option value="FIFTH_BUSINESS_DAY">5º Dia Útil do Mês Seguinte (CLT art. 459)</option>
+                  <option value="LAST_DAY_OF_MONTH">Último Dia do Próprio Mês</option>
+                </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  Define automaticamente a data de pagamento ao abrir novas competências (Lei 7.713/88).
+                </p>
+              </div>
+
+              <div className="flex items-start pt-6">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900"
+                    checked={formData.withhold_irrf_on_advance}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        withhold_irrf_on_advance: e.target.checked,
+                      })
+                    }
+                  />
+                  <div>
+                    <span className="text-sm font-semibold text-slate-800 block">
+                      Reter IRRF no Adiantamento Salarial (Regime de Caixa)
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      Soma salário pago no 5º dia útil + adiantamento no mesmo mês de caixa e retém a diferença.
+                    </span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 border-b border-slate-100 pb-4 mb-6 mt-8">
+              <h2 className="text-lg font-bold text-slate-800">
+                Desoneração da Folha / CPRB (Lei 14.973/2024)
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              <div className="md:col-span-2">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900"
+                    checked={formData.is_cprb_exempted}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        is_cprb_exempted: e.target.checked,
+                      })
+                    }
+                  />
+                  <div>
+                    <span className="text-sm font-semibold text-slate-800 block">
+                      Empresa Enquadrada na CPRB (Desoneração da Folha)
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      Habilita a transição gradual da CPP sobre empregados CLT conforme cronograma da Lei 14.973/2024 (pró-labore permanece em 20%).
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              {formData.is_cprb_exempted && (
+                <>
+                  <div>
+                    <label className="input-label">Receita Bruta Total (R$)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="Ex: 1000000.00"
+                      className="input font-mono"
+                      value={formData.cprb_gross_revenue_total}
+                      onChange={(e) =>
+                        setFormData({ ...formData, cprb_gross_revenue_total: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="input-label">Receita Bruta Desonerada (R$)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="Ex: 600000.00"
+                      className="input font-mono"
+                      value={formData.cprb_gross_revenue_exempt}
+                      onChange={(e) =>
+                        setFormData({ ...formData, cprb_gross_revenue_exempt: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="input-label">Ano-Base de Reoneração (Opcional)</label>
+                    <input
+                      type="number"
+                      min="2024"
+                      max="2035"
+                      placeholder="Automático pelo ano da competência"
+                      className="input font-mono"
+                      value={formData.cprb_reoneration_year}
+                      onChange={(e) =>
+                        setFormData({ ...formData, cprb_reoneration_year: e.target.value })
+                      }
+                    />
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="flex items-center gap-3 border-b border-slate-100 pb-4 mb-6 mt-8">

@@ -13,6 +13,8 @@ import PersonalDocsInbox from '../pages/Documents/PersonalDocsInbox';
 import EmployeePortal from '../pages/Portals/EmployeePortal';
 import EmployeePortalLogin from '../pages/Portals/Login';
 import PublicDocumentVerification from '../pages/Public/PublicDocumentVerification';
+import PublicPunchVerification from '../pages/Public/PublicPunchVerification';
+import ManagerApprovals from '../pages/Approvals/ManagerApprovals';
 import VacationsList from '../pages/Vacations/List';
 import VacationWizard from '../pages/Vacations/Wizard';
 import LeavesList from '../pages/Leaves/List';
@@ -26,6 +28,7 @@ import PayrollEvents from '../pages/Payroll/Events';
 import PayrollCalculations from '../pages/Payroll/Calculations';
 import Payslips from '../pages/Payroll/Payslips';
 import PayrollReports from '../pages/Payroll/Reports';
+import AccountingHub from '../pages/Accounting/AccountingHub';
 import TerminationsList from '../pages/Offboarding/List';
 import OffboardingWizard from '../pages/Offboarding/Wizard';
 import Movements from '../pages/Movements';
@@ -36,7 +39,10 @@ import SettingsDashboard from '../pages/Settings/Dashboard';
 import LegalTablesList from '../pages/Settings/LegalTables/List';
 import LegalTablesForm from '../pages/Settings/LegalTables/Form';
 import LogViewer from '../pages/Audit/LogViewer';
+import AdmissionWizard from '../pages/PublicAdmission/AdmissionWizard';
+import AdmissionManagement from '../pages/Admissions/AdmissionManagement';
 import Help from '../pages/Help';
+import DataImport from '../pages/Migration/DataImport';
 
 import CompaniesList from '../pages/Companies/List';
 import CompanyForm from '../pages/Companies/Form';
@@ -56,6 +62,7 @@ import HolidaysList from '../pages/Timekeeping/Holidays/List';
 import HolidayForm from '../pages/Timekeeping/Holidays/Form';
 import ContractTypesList from '../pages/Organization/ContractTypes/List';
 import ContractTypeForm from '../pages/Organization/ContractTypes/Form';
+import UnionsList from '../pages/Organization/Unions/List';
 import EmployeesList from '../pages/Employees/List';
 import EmployeeProfile from '../pages/Employees/Profile';
 
@@ -71,6 +78,9 @@ export function AppRoutes() {
           <Route path="/portal/dashboard" element={<EmployeePortal />} />
           <Route path="/verificar" element={<PublicDocumentVerification />} />
           <Route path="/verificar/:codigo" element={<PublicDocumentVerification />} />
+          <Route path="/verificar-ponto" element={<PublicPunchVerification />} />
+          <Route path="/verificar-ponto/:codigo" element={<PublicPunchVerification />} />
+          <Route path="/admissao/:token" element={<AdmissionWizard />} />
           <Route path="/403" element={<AccessDenied403 />} />
           
           {/* Rotas Administrativas protegidas */}
@@ -107,6 +117,8 @@ export function AppRoutes() {
                 <Route path="/tipos-de-contrato/novo" element={<ContractTypeForm />} />
                 <Route path="/tipos-de-contrato/:id" element={<ContractTypeForm />} />
 
+                <Route path="/sindicatos" element={<UnionsList />} />
+
                 <Route path="/centros-de-custo" element={<CostCentersList />} />
                 <Route path="/centros-de-custo/novo" element={<CostCenterForm />} />
                 <Route path="/centros-de-custo/:id" element={<CostCenterForm />} />
@@ -118,6 +130,7 @@ export function AppRoutes() {
 
               {/* Colaboradores e Movimentações */}
               <Route element={<RequirePermission permission="view_employees" />}>
+                <Route path="/admissoes" element={<AdmissionManagement />} />
                 <Route path="/funcionarios" element={<EmployeesList />} />
                 <Route path="/funcionarios/novo" element={<EmployeeProfile />} />
                 <Route path="/funcionarios/:id" element={<EmployeeProfile />} />
@@ -179,6 +192,12 @@ export function AppRoutes() {
               </Route>
               <Route element={<RequirePermission permission="view_payroll_accounting" />}>
                 <Route path="/folha/relatorios" element={<PayrollReports />} />
+                <Route path="/contabilidade" element={<AccountingHub />} />
+              </Route>
+
+              {/* Aprovações da Equipe (Gestor -> DP) */}
+              <Route element={<RequirePermission permission={['approve_team_requests', 'manage_time_tracking', 'manage_vacations']} />}>
+                <Route path="/aprovacoes" element={<ManagerApprovals />} />
               </Route>
               
               {/* eSocial & SST */}
@@ -197,6 +216,9 @@ export function AppRoutes() {
               </Route>
               
               {/* Auditoria & Configurações */}
+              <Route element={<RequirePermission permission={['manage_settings', 'calculate_payroll']} />}>
+                <Route path="/implantacao" element={<DataImport />} />
+              </Route>
               <Route element={<RequirePermission permission="view_audit_logs" />}>
                 <Route path="/auditoria" element={<LogViewer />} />
               </Route>

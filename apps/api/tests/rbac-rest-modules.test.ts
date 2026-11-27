@@ -120,7 +120,10 @@ describe('RBAC-05: Módulos REST Validados com Zod e Alinhamento do Frontend api
         [contractId, tenantId, workerId, companyId, establishmentId, departmentId, positionId]
       );
 
-      // 5. Período Aquisitivo de Férias
+      // 5. Período Aquisitivo de Férias (limpa agendamentos de execuções anteriores para idempotência)
+      await client.query(`DELETE FROM public.vacation_schedules WHERE vacation_period_id = $1;`, [
+        vacationPeriodId,
+      ]);
       await client.query(
         `INSERT INTO public.vacation_periods (
           id, tenant_id, contract_id, acquisition_start, acquisition_end, concessive_end,
@@ -128,7 +131,7 @@ describe('RBAC-05: Módulos REST Validados com Zod e Alinhamento do Frontend api
         ) VALUES (
           $1, $2, $3, '2023-01-01', '2023-12-31', '2024-12-31',
           30, 0, 30, 'OPEN'
-        ) ON CONFLICT (id) DO UPDATE SET days_remaining = 30, days_taken = 0;`,
+        ) ON CONFLICT (id) DO UPDATE SET days_accrued = 30, days_remaining = 30, days_taken = 0, absences_count = 0, status = 'OPEN', lost_by_leave = FALSE;`,
         [vacationPeriodId, tenantId, contractId]
       );
 

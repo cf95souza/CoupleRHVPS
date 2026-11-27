@@ -171,9 +171,9 @@ INSERT INTO public.rubrics (
     '{"inss": false, "irrf": false, "fgts": false, "inss_patronal": false, "rat": false, "terceiros": false, "gera_base_inss": false, "gera_base_irrf": false, "gera_base_fgts": false, "integra_dsr": false}'::jsonb
 ),
 (
-    'a0000000-0000-0000-0000-000000000501',
-    '501', 'Salário Família', 'EARNING', 'FAMILY_SALARY', 'FAMILY_SALARY', 'ACTIVE', TRUE,
-    'FORMULA', 35, NULL, NULL, 'COTA_FAMILIA * NUM_DEPENDENTES_SF',
+    'a0000000-0000-0000-0000-000000000305',
+    '305', 'Salário-Família', 'EARNING', 'FAMILY_SALARY', 'FAMILY_SALARY', 'ACTIVE', TRUE,
+    'SYSTEM', 35, NULL, NULL, 'COTA_FAMILIA * NUM_DEPENDENTES_SF * PROPORCAO_SF',
     '{"inss": false, "irrf": false, "fgts": false, "inss_patronal": false, "rat": false, "terceiros": false, "gera_base_inss": false, "gera_base_irrf": false, "gera_base_fgts": false, "integra_dsr": false}'::jsonb
 ),
 (

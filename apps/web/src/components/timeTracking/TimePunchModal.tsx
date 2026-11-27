@@ -3,26 +3,29 @@ import {
   Clock,
   MapPin,
   CheckCircle2,
-  AlertCircle,
   AlertTriangle,
   Loader2,
   X,
-  FileText,
   ShieldCheck,
   ShieldAlert,
-  QrCode,
   Download,
-  Home,
-  Navigation
+  Camera,
+  WifiOff,
+  Navigation,
+  ExternalLink,
 } from 'lucide-react';
-import { supabase } from '../../lib/apiClient';
 import { toast } from 'sonner';
 import {
-  fetchContractWorkplaceGeofence,
-  validateGeofence,
-  type WorkplaceGeofenceConfig,
-  type GeofenceValidationResult
-} from '../../services/timeTracking/timeTrackingGeoService';
+  validateAntiSpoofingAndMultiGeofence,
+  type AllowedWorkplaceConfig,
+  type AntiSpoofingGeoResult,
+} from '@couplerh/payroll-core';
+import {
+  enqueueOfflinePunch,
+  listOfflinePunches,
+  syncOfflinePunches,
+} from '../../lib/offlinePunchQueue';
+import { pontoEnterpriseService } from '../../services/timeTracking/pontoEnterpriseService';
 
 interface TimePunchModalProps {
   isOpen: boolean;
@@ -37,16 +40,16 @@ interface TimePunchModalProps {
 
 interface PunchReceipt {
   punch_id: string;
-  device_id: string;
   nsr: number;
   punched_at: string;
   receipt_code: string;
   entry_type: string;
-  geo?: {
-    latitude: number;
-    longitude: number;
-    accuracy?: number;
-  };
+  entry_type_label: string;
+  sha256_hash: string;
+  qr_code_data_url?: string;
+  verification_url?: string;
+  offline_queued?: boolean;
+  geofence_status?: string;
 }
 
 export const TimePunchModal: React.FC<TimePunchModalProps> = ({
@@ -57,10 +60,10 @@ export const TimePunchModal: React.FC<TimePunchModalProps> = ({
   workerCpf,
   companyName,
   companyCnpj,
-  onPunchSuccess
+  onPunchSuccess,
 }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [entryType, setEntryType] = useState<'IN' | 'BREAK_START' | 'BREAK_END' | 'OUT'>('IN');
+  const [entryType, setEntryType] = useState<'ENTRY' | 'INTERVAL_START' | 'INTERVAL_END' | 'EXIT'>('ENTRY');
   const [loading, setLoading] = useState(false);
   const [geoState, setGeoState] = useState<{
     latitude: number | null;
@@ -73,53 +76,67 @@ export const TimePunchModal: React.FC<TimePunchModalProps> = ({
     longitude: null,
     accuracy: null,
     error: null,
-    loading: true
+    loading: true,
   });
   const [receipt, setReceipt] = useState<PunchReceipt | null>(null);
 
-  // Estados de Geofencing (TB-05)
-  const [workplaceConfig, setWorkplaceConfig] = useState<WorkplaceGeofenceConfig | null>(null);
-  const [isTelework, setIsTelework] = useState<boolean>(false);
-  const [geofenceResult, setGeofenceResult] = useState<GeofenceValidationResult | null>(null);
-  const [geofenceLoading, setGeofenceLoading] = useState<boolean>(true);
+  const [workplaces, setWorkplaces] = useState<AllowedWorkplaceConfig[]>([]);
+  const [isTelework, setIsTelework] = useState(false);
+  const [geofenceResult, setGeofenceResult] = useState<AntiSpoofingGeoResult | null>(null);
+  const [geofenceLoading, setGeofenceLoading] = useState(true);
 
-  // Relógio em tempo real
+  // Selfie opcional LGPD
+  const [selfieConsentActive, setSelfieConsentActive] = useState(false);
+  const [selfieBase64, setSelfieBase64] = useState<string | null>(null);
+  const [pendingOfflineCount, setPendingOfflineCount] = useState(0);
+
   useEffect(() => {
     if (!isOpen) return;
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, [isOpen]);
 
-  // Carrega configuração de geofence da lotação vinculada ao contrato
   useEffect(() => {
-    if (!isOpen || !contractId) {
-      setWorkplaceConfig(null);
-      setGeofenceResult(null);
-      return;
-    }
-
-    let isMounted = true;
+    if (!isOpen || !contractId) return;
+    let mounted = true;
     setGeofenceLoading(true);
+    setSelfieBase64(null);
 
-    fetchContractWorkplaceGeofence(contractId)
-      .then((cfg) => {
-        if (!isMounted) return;
-        setWorkplaceConfig(cfg.workplace);
-        setIsTelework(cfg.isTelework);
-      })
-      .catch((err) => {
-        console.error('Erro ao consultar perímetro da lotação:', err);
+    Promise.all([
+      pontoEnterpriseService.fetchPortalWorkplaces().catch(() => ({ isTelework: false, workplaces: [] })),
+      pontoEnterpriseService.fetchLgpdConsents().catch(() => []),
+      listOfflinePunches().catch(() => []),
+    ])
+      .then(([wpRes, consents, offlineQueue]) => {
+        if (!mounted) return;
+        setIsTelework(Boolean(wpRes?.isTelework));
+        setWorkplaces(
+          (wpRes?.workplaces || []).map((w: any) => ({
+            id: w.id,
+            name: w.name,
+            latitude: w.latitude !== null ? Number(w.latitude) : null,
+            longitude: w.longitude !== null ? Number(w.longitude) : null,
+            radius_meters: Number(w.radius_meters || 50),
+            enforce_geofence: Boolean(w.enforce_geofence),
+            max_accuracy_meters: Number(w.max_accuracy_meters || 150),
+            allow_external_audit: Boolean(w.allow_external_audit),
+          }))
+        );
+        const hasSelfieConsent = (consents || []).some(
+          (c: any) => c.consent_category === 'BIOMETRIC_SELFIE_PUNCH' && c.granted && !c.revoked_at
+        );
+        setSelfieConsentActive(hasSelfieConsent);
+        setPendingOfflineCount(offlineQueue.length);
       })
       .finally(() => {
-        if (isMounted) setGeofenceLoading(false);
+        if (mounted) setGeofenceLoading(false);
       });
 
     return () => {
-      isMounted = false;
+      mounted = false;
     };
   }, [isOpen, contractId]);
 
-  // Captura geolocalização ao abrir o modal
   useEffect(() => {
     if (!isOpen) {
       setReceipt(null);
@@ -131,14 +148,13 @@ export const TimePunchModal: React.FC<TimePunchModalProps> = ({
         latitude: null,
         longitude: null,
         accuracy: null,
-        error: 'Geolocalização não suportada no seu navegador/aparelho.',
-        loading: false
+        error: 'Geolocalização não suportada neste dispositivo.',
+        loading: false,
       });
       return;
     }
 
     setGeoState((prev) => ({ ...prev, loading: true, error: null }));
-
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setGeoState({
@@ -146,39 +162,58 @@ export const TimePunchModal: React.FC<TimePunchModalProps> = ({
           longitude: pos.coords.longitude,
           accuracy: Math.round(pos.coords.accuracy),
           error: null,
-          loading: false
+          loading: false,
         });
       },
-      (err) => {
-        console.warn('Erro ao obter geolocalização:', err);
+      () => {
         setGeoState({
           latitude: null,
           longitude: null,
           accuracy: null,
           error: 'Permissão de GPS negada ou indisponível.',
-          loading: false
+          loading: false,
         });
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   }, [isOpen]);
 
-  // Calcula a validação de Geofence sempre que GPS ou workplaceConfig forem atualizados
   useEffect(() => {
     if (geofenceLoading || geoState.loading) return;
-
-    const result = validateGeofence({
+    const result = validateAntiSpoofingAndMultiGeofence({
       userLat: geoState.latitude,
       userLon: geoState.longitude,
       userAccuracy: geoState.accuracy,
-      workplace: workplaceConfig,
-      isTelework
+      workplaces,
+      isTelework,
     });
-
     setGeofenceResult(result);
-  }, [geoState, workplaceConfig, isTelework, geofenceLoading]);
+  }, [geoState, workplaces, isTelework, geofenceLoading]);
 
   if (!isOpen) return null;
+
+  const handleSelfieSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setSelfieBase64(String(reader.result || ''));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSyncOfflineNow = async () => {
+    try {
+      const res = await syncOfflinePunches((punches) => pontoEnterpriseService.syncOfflinePunches(punches));
+      setPendingOfflineCount(res.remaining);
+      if (res.synced > 0) {
+        toast.success(`${res.synced} batida(s) offline sincronizada(s) com o servidor!`);
+        if (onPunchSuccess) onPunchSuccess();
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao sincronizar fila offline.');
+    }
+  };
 
   const handleRegisterPunch = async () => {
     if (!contractId) {
@@ -187,48 +222,79 @@ export const TimePunchModal: React.FC<TimePunchModalProps> = ({
     }
 
     setLoading(true);
-    try {
-      const geoPayload =
-        geoState.latitude && geoState.longitude
-          ? {
-              latitude: geoState.latitude,
-              longitude: geoState.longitude,
-              accuracy: geoState.accuracy
-            }
-          : null;
+    const clientUuid = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+    const deviceTimestamp = new Date().toISOString();
 
-      // Chama a RPC atômica register_mobile_punch
-      const { data, error } = await supabase.rpc('register_mobile_punch', {
-        p_contract_id: contractId,
-        p_geo: geoPayload,
-        p_device_fingerprint: navigator.userAgent,
-        p_entry_type: entryType
+    const queueOfflineFallback = async () => {
+      await enqueueOfflinePunch({
+        clientUuid,
+        punchType: entryType,
+        latitude: geoState.latitude,
+        longitude: geoState.longitude,
+        accuracy: geoState.accuracy,
+        isMockLocation: false,
+        deviceFingerprint: navigator.userAgent,
+        deviceTimestamp,
+        selfieBase64,
+        selfieMimeType: 'image/jpeg',
+        createdAt: deviceTimestamp,
       });
+      const queue = await listOfflinePunches();
+      setPendingOfflineCount(queue.length);
+      setReceipt({
+        punch_id: clientUuid,
+        nsr: 0,
+        punched_at: deviceTimestamp,
+        receipt_code: `OFFLINE-${clientUuid.slice(0, 8).toUpperCase()}`,
+        entry_type: entryType,
+        entry_type_label: getEntryLabel(entryType),
+        sha256_hash: 'AGUARDANDO_SINCRONIZACAO_OFFLINE_PWA',
+        offline_queued: true,
+      });
+      toast.warning('Sem conexão: batida salva com segurança na fila offline PWA.');
+    };
 
-      if (error) throw error;
-
-      const punchResult = Array.isArray(data) ? data[0] : data;
-
-      if (!punchResult) {
-        throw new Error('Falha ao registrar marcação.');
+    try {
+      if (!navigator.onLine) {
+        await queueOfflineFallback();
+        return;
       }
 
-      const receiptData: PunchReceipt = {
-        punch_id: punchResult.punch_id,
-        device_id: punchResult.device_id,
-        nsr: Number(punchResult.nsr),
-        punched_at: punchResult.punched_at,
-        receipt_code: punchResult.receipt_code,
-        entry_type: entryType,
-        geo: geoPayload || undefined
-      };
+      const data = await pontoEnterpriseService.registerPunch({
+        punchType: entryType,
+        latitude: geoState.latitude,
+        longitude: geoState.longitude,
+        accuracy: geoState.accuracy,
+        isMockLocation: false,
+        deviceFingerprint: navigator.userAgent,
+        deviceTimestamp,
+        syncOrigin: 'ONLINE_API',
+        clientUuid,
+        selfieBase64: selfieBase64 || undefined,
+        selfieMimeType: 'image/jpeg',
+      });
 
-      setReceipt(receiptData);
-      toast.success('Ponto registrado com sucesso! Comprovante emitido.');
+      setReceipt({
+        punch_id: data.punch_id || data.id,
+        nsr: Number(data.nsr || 0),
+        punched_at: data.punched_at,
+        receipt_code: data.receipt_code,
+        entry_type: data.punch_type || entryType,
+        entry_type_label: data.entry_type_label || getEntryLabel(entryType),
+        sha256_hash: data.sha256_hash,
+        qr_code_data_url: data.qr_code_data_url,
+        verification_url: data.verification_url,
+        geofence_status: data.geofence_status,
+      });
+      toast.success('Ponto registrado no servidor! Comprovante REP-P emitido.');
       if (onPunchSuccess) onPunchSuccess();
     } catch (err: any) {
-      console.error(err);
-      toast.error('Erro ao registrar ponto: ' + (err.message || 'Verifique sua conexão.'));
+      const isNetworkErr = !navigator.onLine || String(err?.message || '').includes('Failed to fetch');
+      if (isNetworkErr) {
+        await queueOfflineFallback();
+      } else {
+        toast.error(err?.message || 'Erro ao registrar ponto.');
+      }
     } finally {
       setLoading(false);
     }
@@ -236,13 +302,13 @@ export const TimePunchModal: React.FC<TimePunchModalProps> = ({
 
   const getEntryLabel = (type: string) => {
     switch (type) {
-      case 'IN':
+      case 'ENTRY':
         return 'Entrada';
-      case 'BREAK_START':
-        return 'Saída Intervalo';
-      case 'BREAK_END':
-        return 'Retorno Intervalo';
-      case 'OUT':
+      case 'INTERVAL_START':
+        return 'Saída Almoço';
+      case 'INTERVAL_END':
+        return 'Retorno Almoço';
+      case 'EXIT':
         return 'Saída';
       default:
         return 'Marcação';
@@ -252,167 +318,96 @@ export const TimePunchModal: React.FC<TimePunchModalProps> = ({
   const formattedHours = String(currentTime.getHours()).padStart(2, '0');
   const formattedMinutes = String(currentTime.getMinutes()).padStart(2, '0');
   const formattedSeconds = String(currentTime.getSeconds()).padStart(2, '0');
-  const formattedDate = currentTime.toLocaleDateString('pt-BR', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric'
-  });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-md w-full overflow-hidden animate-scale-up">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-primary-600 to-indigo-600 px-6 py-5 text-white flex items-center justify-between">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+      <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-md w-full overflow-hidden max-h-[92vh] flex flex-col">
+        <div className="bg-gradient-to-r from-primary-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center">
+            <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center">
               <Clock size={22} className="text-white" />
             </div>
             <div>
-              <h2 className="text-lg font-bold font-display leading-tight">Ponto Eletrônico</h2>
-              <p className="text-xs text-white/80 font-medium">REP-P · Portaria MTP 671/2021</p>
+              <h2 className="text-lg font-bold leading-tight">Ponto Eletrônico Enterprise</h2>
+              <p className="text-xs text-white/80">REP-P · Anti-Spoofing & Offline PWA</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
-          >
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center">
             <X size={18} />
           </button>
         </div>
 
-        {/* Content */}
-        <div className="p-6 space-y-6">
+        <div className="p-6 space-y-5 overflow-y-auto">
+          {pendingOfflineCount > 0 && (
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between text-xs text-amber-900">
+              <span className="flex items-center gap-1.5 font-semibold">
+                <WifiOff size={15} /> {pendingOfflineCount} batida(s) na fila offline
+              </span>
+              <button onClick={handleSyncOfflineNow} className="px-2.5 py-1 rounded-lg bg-amber-600 text-white font-bold">
+                Sincronizar
+              </button>
+            </div>
+          )}
+
           {!receipt ? (
             <>
-              {/* Relógio Digital */}
-              <div className="text-center bg-slate-50 border border-slate-100 rounded-2xl p-5 shadow-inner">
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-1 capitalize">
-                  {formattedDate}
-                </p>
-                <div className="text-4xl sm:text-5xl font-black font-mono text-slate-900 tracking-tight flex justify-center items-baseline gap-1">
-                  <span>{formattedHours}</span>
-                  <span className="text-primary-500 animate-pulse">:</span>
-                  <span>{formattedMinutes}</span>
-                  <span className="text-primary-500 animate-pulse">:</span>
-                  <span className="text-xl sm:text-2xl text-slate-400 font-semibold">{formattedSeconds}</span>
+              <div className="text-center bg-slate-50 border border-slate-100 rounded-2xl p-4">
+                <div className="text-4xl font-black font-mono text-slate-900 flex justify-center items-baseline gap-1">
+                  <span>{formattedHours}</span>:<span>{formattedMinutes}</span>:
+                  <span className="text-xl text-slate-400">{formattedSeconds}</span>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-2 flex items-center justify-center gap-1">
-                  <ShieldCheck size={14} className="text-emerald-500" />
-                  Horário oficial do servidor registrado na confirmação
+                <p className="text-[11px] text-slate-400 mt-1 flex items-center justify-center gap-1">
+                  <ShieldCheck size={13} className="text-emerald-500" />
+                  Validação server-side de contrato, debounce 60s e precisão GPS
                 </p>
               </div>
 
-              {/* Painel de Localização e Geofencing (TB-05) */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs px-3 py-2 bg-slate-50 rounded-xl border border-slate-100">
-                  <span className="text-slate-500 flex items-center gap-1.5 font-medium">
+                  <span className="text-slate-600 flex items-center gap-1.5 font-medium">
                     <Navigation size={14} className={geoState.latitude ? 'text-primary-600' : 'text-slate-400'} />
-                    Sinal GPS do Dispositivo
+                    {geoState.loading
+                      ? 'Obtendo GPS...'
+                      : geoState.latitude
+                        ? `GPS ±${geoState.accuracy}m (${workplaces.length} local(is))`
+                        : geoState.error || 'Sem GPS'}
                   </span>
-                  {geoState.loading ? (
-                    <span className="text-slate-400 flex items-center gap-1 text-[11px]">
-                      <Loader2 size={12} className="animate-spin text-primary-500" /> Sintonizando...
+                  {geofenceResult && (
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        geofenceResult.isAllowed ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                      }`}
+                    >
+                      {geofenceResult.status}
                     </span>
-                  ) : geoState.latitude ? (
-                    <span className="text-emerald-600 font-semibold flex items-center gap-1 text-[11px]">
-                      <CheckCircle2 size={13} /> Conectado (±{geoState.accuracy}m)
-                    </span>
-                  ) : (
-                    <span className="text-amber-600 font-medium text-[11px]">Indisponível</span>
                   )}
                 </div>
-
-                {/* Card de Proximidade e Perímetro */}
-                {geofenceLoading || geoState.loading ? (
-                  <div className="p-3 bg-slate-50 border border-slate-100 rounded-2xl flex items-center gap-2.5 text-xs text-slate-500">
-                    <Loader2 size={16} className="animate-spin text-primary-500 shrink-0" />
-                    <span>Verificando perímetro da unidade de trabalho...</span>
-                  </div>
-                ) : geofenceResult ? (
-                  <div
-                    className={`p-3.5 rounded-2xl border transition-all text-xs space-y-1.5 ${
-                      geofenceResult.status === 'INSIDE'
-                        ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900'
-                        : geofenceResult.status === 'OUTSIDE'
-                        ? 'bg-rose-50 border-rose-200 text-rose-900 shadow-sm'
-                        : geofenceResult.status === 'TELEWORK'
-                        ? 'bg-sky-50 border-sky-200 text-sky-900'
-                        : geofenceResult.status === 'NO_GPS'
-                        ? 'bg-amber-50 border-amber-200 text-amber-900'
-                        : 'bg-slate-50 border-slate-200 text-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 font-bold">
-                        {geofenceResult.status === 'INSIDE' ? (
-                          <>
-                            <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
-                            <span>Perímetro Autorizado</span>
-                          </>
-                        ) : geofenceResult.status === 'OUTSIDE' ? (
-                          <>
-                            <ShieldAlert size={16} className="text-rose-600 shrink-0" />
-                            <span className="text-rose-700 font-extrabold">Fora do Perímetro</span>
-                          </>
-                        ) : geofenceResult.status === 'TELEWORK' ? (
-                          <>
-                            <Home size={16} className="text-sky-600 shrink-0" />
-                            <span>Regime de Teletrabalho</span>
-                          </>
-                        ) : geofenceResult.status === 'NO_GPS' ? (
-                          <>
-                            <AlertTriangle size={16} className="text-amber-600 shrink-0" />
-                            <span className="text-amber-700">GPS Não Detectado</span>
-                          </>
-                        ) : (
-                          <>
-                            <MapPin size={16} className="text-slate-500 shrink-0" />
-                            <span>Auditoria de Localização</span>
-                          </>
-                        )}
-                      </div>
-
-                      {geofenceResult.distanceMeters !== null && (
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                            geofenceResult.isAllowed
-                              ? 'bg-emerald-200/60 text-emerald-800'
-                              : 'bg-rose-200/80 text-rose-800'
-                          }`}
-                        >
-                          {geofenceResult.distanceMeters}m de distância
-                        </span>
-                      )}
-                    </div>
-
-                    <p className="text-[11px] leading-relaxed opacity-90">
-                      {geofenceResult.message}
-                    </p>
-                  </div>
-                ) : null}
+                {geofenceResult && (
+                  <p className="text-[11px] text-slate-500 px-1 flex items-center gap-1">
+                    <MapPin size={12} /> {geofenceResult.message}
+                  </p>
+                )}
               </div>
 
-              {/* Tipo de Marcação */}
               <div>
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 block">
                   Tipo de Marcação
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { id: 'IN', label: '1ª Entrada' },
-                    { id: 'BREAK_START', label: 'Saída Almoço' },
-                    { id: 'BREAK_END', label: 'Retorno Almoço' },
-                    { id: 'OUT', label: '2ª Saída' }
+                    { id: 'ENTRY', label: 'Entrada' },
+                    { id: 'INTERVAL_START', label: 'Saída Almoço' },
+                    { id: 'INTERVAL_END', label: 'Retorno Almoço' },
+                    { id: 'EXIT', label: 'Saída' },
                   ].map((btn) => (
                     <button
                       key={btn.id}
                       type="button"
                       onClick={() => setEntryType(btn.id as any)}
-                      className={`py-2.5 px-3 rounded-xl text-xs font-bold transition-all border ${
+                      className={`py-2.5 px-3 rounded-xl text-xs font-bold border ${
                         entryType === btn.id
-                          ? 'bg-primary-50 border-primary-500 text-primary-700 shadow-sm'
-                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                          ? 'bg-primary-50 border-primary-500 text-primary-700'
+                          : 'bg-white border-slate-200 text-slate-600'
                       }`}
                     >
                       {btn.label}
@@ -421,44 +416,43 @@ export const TimePunchModal: React.FC<TimePunchModalProps> = ({
                 </div>
               </div>
 
-              {/* Botão de Registro com Bloqueio Geodésico */}
-              {(() => {
-                const isBlockedByGeofence = geofenceResult ? !geofenceResult.isAllowed : false;
-                const isWaitingGps = geoState.loading || geofenceLoading;
+              {selfieConsentActive && (
+                <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-2">
+                  <label className="text-xs font-bold text-indigo-900 flex items-center gap-1.5">
+                    <Camera size={14} /> Selfie Opcional (Consentimento LGPD Ativo)
+                  </label>
+                  <input type="file" accept="image/*" capture="user" onChange={handleSelfieSelected} className="text-xs w-full" />
+                </div>
+              )}
 
+              {(() => {
+                const blocked = geofenceResult ? !geofenceResult.isAllowed : false;
+                const waiting = geoState.loading || geofenceLoading;
                 return (
                   <button
                     onClick={handleRegisterPunch}
-                    disabled={loading || isBlockedByGeofence || isWaitingGps}
-                    className={`w-full py-4 rounded-2xl font-extrabold text-base transition-all flex items-center justify-center gap-2 ${
-                      isBlockedByGeofence
-                        ? 'bg-rose-100 text-rose-600 border border-rose-200 cursor-not-allowed opacity-90'
-                        : 'bg-gradient-to-r from-primary-600 to-indigo-600 text-white shadow-lg shadow-primary-500/30 hover:shadow-primary-500/50 hover:brightness-105 active:scale-[0.98] disabled:opacity-50'
+                    disabled={loading || blocked || waiting}
+                    className={`w-full py-3.5 rounded-2xl font-extrabold text-sm flex items-center justify-center gap-2 ${
+                      blocked
+                        ? 'bg-rose-100 text-rose-700 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-primary-600 to-indigo-600 text-white shadow-lg disabled:opacity-50'
                     }`}
                   >
                     {loading ? (
                       <>
-                        <Loader2 size={20} className="animate-spin" />
-                        <span>Registrando e Autenticando...</span>
+                        <Loader2 size={18} className="animate-spin" /> Registrando...
                       </>
-                    ) : isWaitingGps ? (
+                    ) : waiting ? (
                       <>
-                        <Loader2 size={20} className="animate-spin" />
-                        <span>Validando Localização...</span>
+                        <Loader2 size={18} className="animate-spin" /> Validando GPS...
                       </>
-                    ) : isBlockedByGeofence ? (
+                    ) : blocked ? (
                       <>
-                        <ShieldAlert size={20} className="text-rose-600" />
-                        <span>
-                          {geofenceResult?.status === 'OUTSIDE'
-                            ? `Fora do Perímetro (${geofenceResult.distanceMeters}m) — Bloqueado`
-                            : 'GPS Obrigatório — Bloqueado'}
-                        </span>
+                        <ShieldAlert size={18} /> Bloqueado pela Cerca / Anti-Spoofing
                       </>
                     ) : (
                       <>
-                        <CheckCircle2 size={20} />
-                        <span>Confirmar Registro ({getEntryLabel(entryType)})</span>
+                        <CheckCircle2 size={18} /> Confirmar ({getEntryLabel(entryType)})
                       </>
                     )}
                   </button>
@@ -466,60 +460,50 @@ export const TimePunchModal: React.FC<TimePunchModalProps> = ({
               })()}
             </>
           ) : (
-            /* ━━━━ COMPROVANTE DE PONTO OFICIAL (PORTARIA 671) ━━━━ */
-            <div className="space-y-4 animate-fade-in">
-              <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 font-mono text-[11px] text-slate-800 shadow-inner">
+            <div className="space-y-4">
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 font-mono text-[11px]">
                 <div className="text-center border-b border-slate-200 pb-2">
-                  <p className="font-bold text-xs uppercase tracking-wide">COMPROVANTE DE REGISTRO DE PONTO DO TRABALHADOR</p>
-                  <p className="text-[10px] text-slate-500">Portaria MTP nº 671/2021 — REP-P</p>
+                  <p className="font-bold text-xs">COMPROVANTE REP-P · PORTARIA MTP 671/2021</p>
                 </div>
+                <p>EMPREGADOR: {companyName} ({companyCnpj})</p>
+                <p>EMPREGADO: {workerName} ({workerCpf})</p>
+                <p className="font-bold text-primary-700">TIPO: {receipt.entry_type_label}</p>
+                <p>DATA/HORA: {new Date(receipt.punched_at).toLocaleString('pt-BR')}</p>
+                <p>NSR: {receipt.offline_queued ? 'PENDENTE (OFFLINE PWA)' : String(receipt.nsr).padStart(9, '0')}</p>
+                <p>RECIBO: {receipt.receipt_code}</p>
+                <p className="break-all text-[9px] text-slate-500">SHA-256: {receipt.sha256_hash}</p>
 
-                <div className="space-y-1">
-                  <p><span className="text-slate-500">EMPREGADOR:</span> {companyName}</p>
-                  <p><span className="text-slate-500">CNPJ:</span> {companyCnpj}</p>
-                  <p><span className="text-slate-500">EMPREGADO:</span> {workerName}</p>
-                  <p><span className="text-slate-500">CPF:</span> {workerCpf}</p>
-                </div>
-
-                <div className="border-t border-slate-200 pt-2 space-y-1">
-                  <p className="font-bold text-primary-600">
-                    <span className="text-slate-500">TIPO:</span> {getEntryLabel(receipt.entry_type)}
-                  </p>
-                  <p>
-                    <span className="text-slate-500">DATA/HORA:</span>{' '}
-                    {new Date(receipt.punched_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
-                  </p>
-                  <p>
-                    <span className="text-slate-500">NSR:</span>{' '}
-                    <span className="font-bold">{String(receipt.nsr).padStart(9, '0')}</span>
-                  </p>
-                  <p className="break-all text-[9px] text-slate-600">
-                    <span className="text-slate-500">HASH SHA-256:</span> {receipt.receipt_code}
-                  </p>
-                </div>
-
-                {/* QR Code Payload Representation */}
-                <div className="border-t border-slate-200 pt-3 flex flex-col items-center justify-center">
-                  <div className="w-24 h-24 bg-white border border-slate-200 rounded-xl p-2 flex items-center justify-center shadow-sm">
-                    <QrCode size={70} className="text-slate-800" />
+                {receipt.qr_code_data_url ? (
+                  <div className="pt-2 flex flex-col items-center">
+                    <img src={receipt.qr_code_data_url} alt="QR Code Verificação REP-P" className="w-32 h-32 rounded-lg border" />
+                    <a
+                      href={`/verificar-ponto/${receipt.receipt_code}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 text-[10px] text-blue-600 font-sans font-semibold hover:underline flex items-center gap-1"
+                    >
+                      Conferência Pública (Sem CPF na URL) <ExternalLink size={11} />
+                    </a>
                   </div>
-                  <p className="text-[9px] text-slate-400 mt-1">Conferência pública da autenticidade</p>
-                </div>
+                ) : (
+                  <div className="p-2 bg-amber-100 rounded text-amber-900 font-sans text-[11px] flex items-center gap-1.5">
+                    <AlertTriangle size={14} /> Comprovante definitivo com QR Code será emitido ao sincronizar.
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-2">
                 <button
                   onClick={() => window.print()}
-                  className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-50 flex items-center justify-center gap-1.5 transition-colors"
+                  className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5"
                 >
-                  <Download size={16} />
-                  <span>Imprimir Comprovante</span>
+                  <Download size={15} /> Imprimir
                 </button>
                 <button
                   onClick={onClose}
-                  className="flex-1 py-2.5 px-4 rounded-xl bg-primary-600 text-white font-bold text-xs hover:bg-primary-700 flex items-center justify-center gap-1.5 transition-colors shadow-md shadow-primary-500/20"
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-primary-600 text-white font-bold text-xs"
                 >
-                  <span>Concluir</span>
+                  Concluir
                 </button>
               </div>
             </div>

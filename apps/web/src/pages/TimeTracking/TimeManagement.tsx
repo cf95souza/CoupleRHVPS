@@ -32,7 +32,8 @@ import {
   CornerUpLeft,
   Undo2,
   Zap,
-  DollarSign
+  DollarSign,
+  MapPin
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCompany } from '../../contexts/CompanyContext';
@@ -59,10 +60,12 @@ import { TimeExportService } from '../../services/timeTracking/timeExportService
 import { InitialTimeBankBalanceModal } from '../../components/timeTracking/InitialTimeBankBalanceModal';
 import { TimeBankExpirationAlertsModal } from '../../components/timeTracking/TimeBankExpirationAlertsModal';
 import { TimeBankAgreementModal } from '../../components/timeTracking/TimeBankAgreementModal';
+import { PunchAuditMapModal } from '../../components/timeTracking/PunchAuditMapModal';
+import { pontoEnterpriseService, type PunchAuditRecord } from '../../services/timeTracking/pontoEnterpriseService';
 import { confirmDialog } from '../../components/ConfirmDialogProvider';
 import { promptDialog } from '../../components/PromptDialogProvider';
 
-type TabType = 'overview' | 'devices' | 'afd' | 'treatment' | 'approvals' | 'exports';
+type TabType = 'overview' | 'devices' | 'afd' | 'treatment' | 'approvals' | 'audit' | 'exports';
 
 export default function TimeManagement() {
   const { selectedCompanyId, selectedCompany } = useCompany();
@@ -117,6 +120,33 @@ export default function TimeManagement() {
   const [manualPunchType, setManualPunchType] = useState<'IN' | 'OUT' | 'BREAK_START' | 'BREAK_END'>('IN');
   const [manualPunchReason, setManualPunchReason] = useState('');
   const [savingManualPunch, setSavingManualPunch] = useState(false);
+
+  // Estados da Auditoria GPS & Anti-Spoofing (PONTO-02)
+  const [auditPunches, setAuditPunches] = useState<PunchAuditRecord[]>([]);
+  const [auditOnlyFlagged, setAuditOnlyFlagged] = useState(false);
+  const [loadingAudit, setLoadingAudit] = useState(false);
+  const [selectedMapPunch, setSelectedMapPunch] = useState<PunchAuditRecord | null>(null);
+
+  const loadAuditPunches = async () => {
+    setLoadingAudit(true);
+    try {
+      const list = await pontoEnterpriseService.fetchPunchesAudit({
+        companyId: selectedCompanyId || undefined,
+        onlyFlagged: auditOnlyFlagged,
+      });
+      setAuditPunches(list);
+    } catch {
+      setAuditPunches([]);
+    } finally {
+      setLoadingAudit(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'audit') {
+      loadAuditPunches();
+    }
+  }, [activeTab, selectedCompanyId, auditOnlyFlagged]);
 
   // Estados de Integração com Folha e Banco de Horas
   const [integrateModalOpen, setIntegrateModalOpen] = useState(false);
@@ -1130,6 +1160,18 @@ e comprova a idoneidade jurídica do controle de jornada por REP-P.
               {pendingApprovals.totalCount}
             </span>
           )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('audit')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl transition whitespace-nowrap ${
+            activeTab === 'audit'
+              ? 'bg-primary-50 text-primary-700 font-semibold shadow-sm'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+          }`}
+        >
+          <MapPin className="w-4 h-4 text-blue-600" />
+          Auditoria GPS &amp; Mapa
         </button>
 
         <button
@@ -2275,6 +2317,109 @@ e comprova a idoneidade jurídica do controle de jornada por REP-P.
                   </div>
                 ))}
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================== */}
+      {/* ABA: AUDITORIA GPS, MULTI-LOCAIS & ANTI-SPOOFING (PONTO-02) */}
+      {/* ================================================================== */}
+      {activeTab === 'audit' && (
+        <div className="space-y-4">
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">Auditoria GPS, Anti-Spoofing &amp; Mapa</h2>
+              <p className="text-xs text-slate-500">
+                Inspeção de geofence, precisão, velocidade impossível e visualização em mapa OpenStreetMap (Leaflet).
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={auditOnlyFlagged}
+                  onChange={(e) => setAuditOnlyFlagged(e.target.checked)}
+                />
+                Apenas alertas / fora do raio
+              </label>
+              <button
+                onClick={loadAuditPunches}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold hover:bg-slate-50 flex items-center gap-1"
+              >
+                <RefreshCw className="w-3.5 h-3.5" /> Atualizar
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-x-auto">
+            {loadingAudit ? (
+              <div className="p-8 flex justify-center">
+                <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+              </div>
+            ) : auditPunches.length === 0 ? (
+              <p className="p-6 text-sm text-slate-500">Nenhuma marcação GPS encontrada com os filtros atuais.</p>
+            ) : (
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50 text-slate-500 uppercase">
+                  <tr>
+                    <th className="p-3 text-left">Colaborador</th>
+                    <th className="p-3 text-left">Data/Hora</th>
+                    <th className="p-3 text-left">Tipo / Origem</th>
+                    <th className="p-3 text-left">Geofence</th>
+                    <th className="p-3 text-right">Distância / Precisão</th>
+                    <th className="p-3 text-left">Flags Anti-Spoofing</th>
+                    <th className="p-3 text-right">Mapa</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {auditPunches.map((row) => (
+                    <tr key={row.id} className="hover:bg-slate-50">
+                      <td className="p-3 font-semibold text-slate-900">
+                        {row.worker_name || 'N/A'}
+                        <span className="block text-[10px] text-slate-400">{row.workplace_name || 'Sem local'}</span>
+                      </td>
+                      <td className="p-3 font-mono">{new Date(row.punched_at).toLocaleString('pt-BR')}</td>
+                      <td className="p-3">
+                        <span className="font-semibold">{row.entry_type_label}</span>
+                        <span className="block text-[10px] text-slate-400">{row.sync_origin}</span>
+                      </td>
+                      <td className="p-3">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            row.geofence_status === 'INSIDE'
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : row.geofence_status === 'SPOOF_SUSPECT' || row.geofence_status === 'OUTSIDE'
+                                ? 'bg-rose-100 text-rose-700'
+                                : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {row.geofence_status}
+                        </span>
+                      </td>
+                      <td className="p-3 text-right font-mono">
+                        {row.distance_meters !== null ? `${row.distance_meters}m` : '—'} /{' '}
+                        {row.accuracy !== null ? `±${row.accuracy}m` : '—'}
+                      </td>
+                      <td className="p-3">
+                        {row.fraud_flags && row.fraud_flags.length > 0 ? (
+                          <span className="text-rose-700 font-bold">{row.fraud_flags.join(', ')}</span>
+                        ) : (
+                          <span className="text-emerald-600">Limpo</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-right">
+                        <button
+                          onClick={() => setSelectedMapPunch(row)}
+                          className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 font-bold hover:bg-blue-100 inline-flex items-center gap-1"
+                        >
+                          <MapPin className="w-3.5 h-3.5" /> Mapa
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
         </div>
@@ -3428,6 +3573,8 @@ e comprova a idoneidade jurídica do controle de jornada por REP-P.
           if (currentTenantId) await loadExpirationAlerts(currentTenantId);
         }}
       />
+
+      <PunchAuditMapModal punch={selectedMapPunch} onClose={() => setSelectedMapPunch(null)} />
     </div>
   );
 }

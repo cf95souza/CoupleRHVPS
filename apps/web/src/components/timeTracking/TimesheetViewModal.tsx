@@ -6,21 +6,15 @@ import {
   CheckCircle2,
   X,
   Loader2,
-  MessageSquare,
-  ShieldCheck
+  ShieldCheck,
 } from 'lucide-react';
-import { supabase } from '../../lib/apiClient';
+import { toast } from 'sonner';
 import {
   TimesheetPdfService,
   type TimesheetReportData,
   type TimesheetDailyRow,
-  formatMinutesHHMM
 } from '../../services/timeTracking/timesheetPdfService';
-import {
-  TimesheetContestService,
-  type TimesheetRecord
-} from '../../services/timeTracking/timesheetContestService';
-import { toast } from 'sonner';
+import { pontoEnterpriseService } from '../../services/timeTracking/pontoEnterpriseService';
 
 interface TimesheetViewModalProps {
   isOpen: boolean;
@@ -41,10 +35,13 @@ export const TimesheetViewModal: React.FC<TimesheetViewModalProps> = ({
   workerName,
   workerCpf,
   companyName,
-  companyCnpj
+  companyCnpj,
 }) => {
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1);
   const [loading, setLoading] = useState(true);
-  const [timesheet, setTimesheet] = useState<TimesheetRecord | null>(null);
+  const [closure, setClosure] = useState<any | null>(null);
   const [dailyRows, setDailyRows] = useState<TimesheetDailyRow[]>([]);
   const [showContestForm, setShowContestForm] = useState(false);
   const [contestReason, setContestReason] = useState('');
@@ -55,123 +52,68 @@ export const TimesheetViewModal: React.FC<TimesheetViewModalProps> = ({
   useEffect(() => {
     if (!isOpen || !contractId) return;
     fetchTimesheetData();
-  }, [isOpen, contractId]);
+  }, [isOpen, contractId, year, month]);
 
   const fetchTimesheetData = async () => {
     setLoading(true);
     try {
-      // 1. Buscar último espelho de ponto do contrato
-      const { data: tsData, error: tsError } = await supabase
-        .from('timesheets')
-        .select('*')
-        .eq('contract_id', contractId)
-        .order('period_start', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (tsError) throw tsError;
-
-      if (!tsData) {
-        setTimesheet(null);
-        setDailyRows([]);
-        return;
-      }
-
-      setTimesheet(tsData as TimesheetRecord);
-
-      // 2. Buscar resumos diários da competência para montar a grade
-      const { data: dailyData, error: dailyError } = await supabase
-        .from('time_daily_summary')
-        .select('*')
-        .eq('contract_id', contractId)
-        .gte('date', tsData.period_start)
-        .lte('date', tsData.period_end)
-        .order('date', { ascending: true });
-
-      if (dailyError) throw dailyError;
-
-      const rows: TimesheetDailyRow[] = (dailyData || []).map((d: any) => {
-        const dateObj = new Date(d.date + 'T12:00:00Z');
-        const dayOfWeek = dateObj.toLocaleDateString('pt-BR', { weekday: 'short' });
-
+      const res = await pontoEnterpriseService.fetchPortalTimesheet(year, month);
+      setClosure(res.closure || { status: 'OPEN', year, month });
+      const rows: TimesheetDailyRow[] = (res.summaries || []).map((d: any) => {
+        const dtStr = String(d.work_date).slice(0, 10);
+        const dayOfWeek = new Date(`${dtStr}T12:00:00Z`).toLocaleDateString('pt-BR', { weekday: 'short' });
         return {
-          date: d.date,
+          date: dtStr,
           dayOfWeek,
-          punches: d.notes?.includes('Batidas:') ? d.notes.replace('Batidas: ', '').split(' ') : [],
-          worked_minutes: d.worked_minutes || 0,
-          overtime_50_minutes: d.overtime_50_minutes || 0,
-          overtime_100_minutes: d.overtime_100_minutes || 0,
-          night_shift_minutes: d.night_shift_minutes || 0,
-          delay_minutes: d.delay_minutes || 0,
-          absence_minutes: d.absence_minutes || 0,
-          intrajornada_violation_minutes: d.intrajornada_violation_minutes || 0,
-          time_bank_minutes: (d.time_bank_credited_minutes || 0) - (d.time_bank_debited_minutes || 0),
+          punches: Array.isArray(d.punches) ? d.punches : [],
+          worked_minutes: Math.round(Number(d.worked_hours || 0) * 60),
+          overtime_50_minutes: Math.round(Number(d.overtime_50_hours || 0) * 60),
+          overtime_100_minutes: Math.round(Number(d.overtime_100_hours || 0) * 60),
+          night_shift_minutes: Math.round(Number(d.night_hours || 0) * 60),
+          delay_minutes: Math.round(Number(d.delay_hours || 0) * 60),
+          absence_minutes: Math.round(Number(d.absence_hours || 0) * 60),
+          intrajornada_violation_minutes: 0,
+          time_bank_minutes: Math.round(Number(d.time_bank_balance_hours || 0) * 60),
           status: d.status || 'REGULAR',
-          notes: d.notes || ''
+          notes: '',
         };
       });
-
       setDailyRows(rows);
     } catch (err: any) {
-      console.error(err);
-      toast.error('Erro ao carregar espelho de ponto: ' + (err.message || 'Desconhecido'));
+      toast.error(err?.message || 'Erro ao carregar espelho de ponto.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleDownloadPdf = () => {
-    if (!timesheet) return;
-
     try {
+      const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+      const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
       const reportData: TimesheetReportData = {
-        tenant_id: timesheet.tenant_id,
-        company: {
-          corporate_name: companyName,
-          cnpj: companyCnpj
-        },
-        employee: {
-          worker_id: workerId,
-          full_name: workerName,
-          cpf: workerCpf
-        },
-        period: {
-          month: parseInt(timesheet.period_start.substring(5, 7), 10),
-          year: parseInt(timesheet.period_start.substring(0, 4), 10),
-          start_date: timesheet.period_start,
-          end_date: timesheet.period_end
-        },
-        daily_rows: dailyRows
+        tenant_id: '',
+        company: { corporate_name: companyName, cnpj: companyCnpj },
+        employee: { worker_id: workerId, full_name: workerName, cpf: workerCpf },
+        period: { month, year, start_date: startDate, end_date: endDate },
+        daily_rows: dailyRows,
       };
-
       const doc = TimesheetPdfService.generateTimesheetPdf(reportData);
-      doc.save(`Espelho_Ponto_${workerName.replace(/\s+/g, '_')}_${timesheet.period_start}.pdf`);
+      doc.save(`Espelho_Ponto_${workerName.replace(/\s+/g, '_')}_${year}_${String(month).padStart(2, '0')}.pdf`);
       toast.success('Download do Espelho de Ponto em PDF concluído.');
     } catch (err: any) {
-      console.error(err);
-      toast.error('Erro ao gerar PDF do espelho: ' + err.message);
+      toast.error('Erro ao gerar PDF: ' + err.message);
     }
   };
 
   const handleSignTimesheet = async () => {
-    if (!timesheet) return;
     setSigning(true);
     try {
-      const { error } = await supabase
-        .from('timesheets')
-        .update({
-          status: 'SIGNED',
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', timesheet.id);
-
-      if (error) throw error;
-
-      setTimesheet((prev) => (prev ? { ...prev, status: 'SIGNED' } : null));
-      toast.success('Espelho de ponto assinado com sucesso!');
+      const updated = await pontoEnterpriseService.signPortalTimesheet(year, month);
+      setClosure(updated);
+      toast.success('Espelho de ponto assinado digitalmente!');
     } catch (err: any) {
-      console.error(err);
-      toast.error('Erro ao assinar espelho: ' + (err.message || 'Desconhecido'));
+      toast.error(err?.message || 'Erro ao assinar espelho.');
     } finally {
       setSigning(false);
     }
@@ -179,55 +121,25 @@ export const TimesheetViewModal: React.FC<TimesheetViewModalProps> = ({
 
   const handleOpenContest = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!timesheet) return;
-
-    if (!contestReason || contestReason.trim().length < 10) {
-      toast.error('Descreva o motivo da contestação com no mínimo 10 caracteres.');
+    if (!contestReason || contestReason.trim().length < 5) {
+      toast.error('Descreva o motivo da contestação.');
       return;
     }
-
     setSubmittingContest(true);
     try {
-      // 1. Executa serviço de contestação
-      const contestResult = TimesheetContestService.openContest({
-        timesheet,
-        worker_id: workerId,
-        reason: contestReason,
-        affected_dates: affectedDate ? [affectedDate] : []
+      const updated = await pontoEnterpriseService.contestPortalTimesheet({
+        year,
+        month,
+        affectedDate: affectedDate || undefined,
+        reason: contestReason.trim(),
       });
-
-      // 2. Grava no banco de dados
-      const { error: insertError } = await supabase.from('timesheet_contests').insert({
-        tenant_id: timesheet.tenant_id,
-        timesheet_id: timesheet.id,
-        contract_id: contractId,
-        worker_id: workerId,
-        reason: contestResult.contest.reason,
-        affected_dates: contestResult.contest.affected_dates,
-        status: 'PENDING'
-      });
-
-      if (insertError) throw insertError;
-
-      // 3. Atualiza status em timesheets
-      await supabase
-        .from('timesheets')
-        .update({
-          status: 'CONTESTED',
-          rejection_reason: contestResult.contest.reason,
-          contested_at: contestResult.timesheet.contested_at,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', timesheet.id);
-
-      setTimesheet(contestResult.timesheet);
+      setClosure(updated);
       setShowContestForm(false);
       setContestReason('');
       setAffectedDate('');
-      toast.success('Contestação enviada ao Departamento Pessoal para análise.');
+      toast.success('Contestação enviada ao Gestor e DP.');
     } catch (err: any) {
-      console.error(err);
-      toast.error('Erro ao contestar espelho: ' + (err.message || 'Desconhecido'));
+      toast.error(err?.message || 'Erro ao contestar espelho.');
     } finally {
       setSubmittingContest(false);
     }
@@ -235,196 +147,134 @@ export const TimesheetViewModal: React.FC<TimesheetViewModalProps> = ({
 
   if (!isOpen) return null;
 
-  const totals = TimesheetPdfService.calculateMonthlyTotals(dailyRows);
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-scale-up">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-slate-900 to-indigo-900 px-6 py-5 text-white flex items-center justify-between shrink-0">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+      <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+        <div className="bg-gradient-to-r from-slate-900 to-indigo-900 px-6 py-4 text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center">
-              <FileText size={22} className="text-white" />
+            <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center">
+              <FileText size={20} />
             </div>
             <div>
-              <h2 className="text-lg font-bold font-display leading-tight">Espelho de Ponto</h2>
-              <p className="text-xs text-white/80 font-medium">Portaria MTP nº 671/2021</p>
+              <h2 className="text-lg font-bold">Espelho de Ponto (Multi-Mês)</h2>
+              <p className="text-xs text-white/80">Portaria MTP nº 671/2021 · Status: {closure?.status || 'OPEN'}</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
-          >
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center">
             <X size={18} />
           </button>
         </div>
 
-        {/* Content */}
-        <div className="p-6 overflow-y-auto space-y-5 flex-1">
-          {loading ? (
-            <div className="py-12 flex flex-col items-center justify-center text-slate-400 gap-3">
-              <Loader2 size={32} className="animate-spin text-indigo-500" />
-              <p className="text-sm font-medium">Carregando espelho de ponto...</p>
+        <div className="p-5 overflow-y-auto space-y-4 flex-1">
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2">
+              <select
+                value={month}
+                onChange={(e) => setMonth(Number(e.target.value))}
+                className="px-2.5 py-1.5 rounded-lg border text-xs bg-white font-semibold"
+              >
+                {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                  <option key={m} value={m}>
+                    Mês {String(m).padStart(2, '0')}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={year}
+                onChange={(e) => setYear(Number(e.target.value))}
+                className="px-2.5 py-1.5 rounded-lg border text-xs bg-white font-semibold"
+              >
+                {[2025, 2026, 2027].map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
             </div>
-          ) : !timesheet ? (
-            <div className="text-center py-10 space-y-3">
-              <FileText size={40} className="mx-auto text-slate-300" />
-              <p className="text-base font-bold text-slate-700">Espelho ainda não apurado</p>
-              <p className="text-xs text-slate-400 max-w-xs mx-auto">
-                O espelho deste período ainda está em processamento pelo Departamento Pessoal.
-              </p>
-            </div>
-          ) : (
-            <>
-              {/* Status do Espelho e Download */}
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between">
-                <div>
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                    Período: {timesheet.period_start} a {timesheet.period_end}
-                  </span>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span
-                      className={`text-xs font-extrabold px-2.5 py-0.5 rounded-full ${
-                        timesheet.status === 'SIGNED'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : timesheet.status === 'CONTESTED'
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-indigo-100 text-indigo-800'
-                      }`}
-                    >
-                      {timesheet.status === 'SIGNED'
-                        ? 'Assinado pelo Colaborador'
-                        : timesheet.status === 'CONTESTED'
-                        ? 'Contestação sob Análise do DP'
-                        : 'Pendente de Ciência / Assinatura'}
-                    </span>
-                  </div>
-                </div>
 
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleDownloadPdf}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700 flex items-center gap-1"
+              >
+                <Download size={14} /> PDF
+              </button>
+              {closure?.status !== 'SIGNED_EMPLOYEE' && (
                 <button
-                  onClick={handleDownloadPdf}
-                  className="py-2 px-3 rounded-xl bg-white border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-100 flex items-center gap-1.5 shadow-sm transition-all"
+                  onClick={handleSignTimesheet}
+                  disabled={signing}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold flex items-center gap-1"
                 >
-                  <Download size={14} />
-                  <span>Baixar PDF</span>
+                  <ShieldCheck size={14} /> {signing ? 'Assinando...' : 'Aceitar Espelho'}
                 </button>
-              </div>
-
-              {/* Totalizadores Mensais */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center">
-                  <p className="text-[10px] uppercase font-bold text-slate-400">Trabalhadas</p>
-                  <p className="text-base font-mono font-black text-slate-900 mt-0.5">
-                    {totals.total_worked_formatted}
-                  </p>
-                </div>
-                <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-center">
-                  <p className="text-[10px] uppercase font-bold text-emerald-600">Horas Extras</p>
-                  <p className="text-base font-mono font-black text-emerald-700 mt-0.5">
-                    {formatMinutesHHMM(totals.total_overtime_50_minutes + totals.total_overtime_100_minutes)}
-                  </p>
-                </div>
-                <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl text-center">
-                  <p className="text-[10px] uppercase font-bold text-indigo-600">Adic. Noturno</p>
-                  <p className="text-base font-mono font-black text-indigo-700 mt-0.5">
-                    {totals.total_night_shift_formatted}
-                  </p>
-                </div>
-                <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-center">
-                  <p className="text-[10px] uppercase font-bold text-rose-600">Atrasos/Faltas</p>
-                  <p className="text-base font-mono font-black text-rose-700 mt-0.5">
-                    {totals.total_delay_formatted}
-                  </p>
-                </div>
-              </div>
-
-              {/* Formulário de Contestação */}
-              {showContestForm && (
-                <form
-                  onSubmit={handleOpenContest}
-                  className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-3 animate-fade-in"
-                >
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-bold text-amber-900 uppercase tracking-wide">
-                      Contestar Marcações do Espelho
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => setShowContestForm(false)}
-                      className="text-amber-500 hover:text-amber-700"
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] font-semibold text-amber-800 block mb-1">
-                      Data da Ocorrência (Opcional)
-                    </label>
-                    <input
-                      type="date"
-                      className="w-full text-xs py-2 px-3 bg-white border border-amber-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/20"
-                      value={affectedDate}
-                      onChange={(e) => setAffectedDate(e.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] font-semibold text-amber-800 block mb-1">
-                      Motivo Detalhado da Contestação *
-                    </label>
-                    <textarea
-                      required
-                      rows={3}
-                      placeholder="Descreva a inconsistência (ex: trabalhei até 19h no dia 10 e a batida não computou)..."
-                      className="w-full text-xs py-2 px-3 bg-white border border-amber-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/20"
-                      value={contestReason}
-                      onChange={(e) => setContestReason(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setShowContestForm(false)}
-                      className="py-1.5 px-3 rounded-xl border border-amber-200 text-xs text-amber-800 font-semibold"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={submittingContest}
-                      className="py-1.5 px-4 rounded-xl bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 flex items-center gap-1.5"
-                    >
-                      {submittingContest ? <Loader2 size={14} className="animate-spin" /> : <AlertCircle size={14} />}
-                      <span>Enviar Contestação</span>
-                    </button>
-                  </div>
-                </form>
               )}
+              <button
+                onClick={() => setShowContestForm(!showContestForm)}
+                className="px-3 py-1.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold flex items-center gap-1"
+              >
+                <AlertCircle size={14} /> Contestar
+              </button>
+            </div>
+          </div>
 
-              {/* Botões de Ação de Assinatura / Contestação */}
-              {timesheet.status === 'PENDING_SIGNATURE' && !showContestForm && (
-                <div className="flex gap-2 pt-2">
-                  <button
-                    onClick={() => setShowContestForm(true)}
-                    className="flex-1 py-3 px-4 rounded-xl border border-amber-300 text-amber-800 font-bold text-xs hover:bg-amber-50 flex items-center justify-center gap-1.5 transition-colors"
-                  >
-                    <MessageSquare size={16} />
-                    <span>Contestar Ponto</span>
-                  </button>
+          {showContestForm && (
+            <form onSubmit={handleOpenContest} className="p-4 bg-rose-50/70 border border-rose-200 rounded-2xl space-y-3">
+              <input
+                type="date"
+                value={affectedDate}
+                onChange={(e) => setAffectedDate(e.target.value)}
+                className="px-3 py-2 rounded-xl border text-xs bg-white"
+              />
+              <textarea
+                rows={2}
+                value={contestReason}
+                onChange={(e) => setContestReason(e.target.value)}
+                placeholder="Descreva a divergência encontrada..."
+                className="w-full p-2.5 rounded-xl border text-xs bg-white"
+              />
+              <button type="submit" disabled={submittingContest} className="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold">
+                {submittingContest ? 'Enviando...' : 'Confirmar Contestação'}
+              </button>
+            </form>
+          )}
 
-                  <button
-                    onClick={handleSignTimesheet}
-                    disabled={signing}
-                    className="flex-1 py-3 px-4 rounded-xl bg-emerald-600 text-white font-bold text-xs hover:bg-emerald-700 flex items-center justify-center gap-1.5 transition-colors shadow-md shadow-emerald-500/20"
-                  >
-                    {signing ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
-                    <span>Dar Ciência e Assinar</span>
-                  </button>
-                </div>
-              )}
-            </>
+          {loading ? (
+            <div className="py-10 flex justify-center">
+              <Loader2 size={24} className="animate-spin text-indigo-600" />
+            </div>
+          ) : dailyRows.length === 0 ? (
+            <p className="text-center py-8 text-xs text-slate-400">Sem apontamentos fechados para {String(month).padStart(2, '0')}/{year}.</p>
+          ) : (
+            <div className="overflow-x-auto border rounded-2xl">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50 text-slate-500">
+                  <tr>
+                    <th className="p-2.5 text-left">Data</th>
+                    <th className="p-2.5 text-right">Trab.</th>
+                    <th className="p-2.5 text-right">HE 50%</th>
+                    <th className="p-2.5 text-right">Noturno</th>
+                    <th className="p-2.5 text-right">Atrasos</th>
+                    <th className="p-2.5 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {dailyRows.map((row) => (
+                    <tr key={row.date} className="hover:bg-slate-50">
+                      <td className="p-2.5 font-mono">{row.date} ({row.dayOfWeek})</td>
+                      <td className="p-2.5 text-right">{(row.worked_minutes / 60).toFixed(2)}h</td>
+                      <td className="p-2.5 text-right text-emerald-700 font-semibold">{(row.overtime_50_minutes / 60).toFixed(2)}h</td>
+                      <td className="p-2.5 text-right">{(row.night_shift_minutes / 60).toFixed(2)}h</td>
+                      <td className="p-2.5 text-right text-rose-600">{(row.delay_minutes / 60).toFixed(2)}h</td>
+                      <td className="p-2.5 text-center">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-[10px] font-bold">
+                          <CheckCircle2 size={10} /> {row.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>

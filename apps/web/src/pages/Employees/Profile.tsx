@@ -33,7 +33,8 @@ import EmployeeDeductionsTab from "../EmployeeDeductionsTab";
 import EmployeeFixedEventsTab from "../EmployeeFixedEventsTab";
 import EmployeeLoansTab from "../EmployeeLoansTab";
 import SalaryAdjustmentsTab from "./components/SalaryAdjustmentsTab";
-import { Receipt, Gift, TrendingUp, DollarSign, Phone, Building, FileText, Save, Check, Landmark } from "lucide-react";
+import { MultipleEmploymentsPanel } from "../../components/employees/MultipleEmploymentsPanel";
+import { Receipt, Gift, TrendingUp, DollarSign, Phone, Building, FileText, Save, Check, Landmark, Layers } from "lucide-react";
 
 const TABS = [
   { id: 'personal', label: 'Dados Pessoais', icon: User },
@@ -44,6 +45,7 @@ const TABS = [
   { id: 'history', label: 'Histórico Funcional', icon: History },
   { id: 'salary_adjustments', label: 'Reajustes / Dissídio', icon: DollarSign },
   { id: 'dependents', label: 'Dependentes', icon: Users },
+  { id: 'multiple_employments', label: 'Múltiplos Vínculos (INSS)', icon: Layers },
   { id: 'benefits', label: 'Benefícios', icon: Gift },
   { id: 'fixed_events', label: 'Adicionais / Fixos', icon: TrendingUp },
   { id: 'deductions', label: 'Descontos / Retenções', icon: Receipt },
@@ -270,6 +272,13 @@ export default function EmployeeProfile() {
           <DependentsTab 
             workerId={id !== 'novo' ? id : null} 
             onSaved={handleGenericSave} 
+          />
+        </div>
+
+        <div id="tab-content-multiple_employments" className={activeTab === 'multiple_employments' ? 'block' : 'hidden'}>
+          <MultipleEmploymentsPanel
+            workerId={id !== 'novo' ? id : null}
+            contractId={workerData?.employment_contracts?.[0]?.id}
           />
         </div>
         

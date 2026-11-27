@@ -1,8 +1,78 @@
 import { FastifyPluginAsync } from 'fastify';
 import { authenticate, requireAdminRole } from '../auth/authMiddleware.js';
+import { BiService } from './BiService.js';
 
 export const biRoutes: FastifyPluginAsync = async (app) => {
-  // Dashboard Executivo de BI e Métricas de Folha (Protegido para RH e Admin)
+  const biService = new BiService();
+
+  // 1. Dashboard Executivo Completo de BI & Custos Reais da Empresa
+  app.get(
+    '/dashboard-executive',
+    { preHandler: [authenticate, requireAdminRole] },
+    async (request, reply) => {
+      if (!request.withContext) {
+        return reply.status(500).send({ success: false, error: 'Contexto de banco não inicializado.' });
+      }
+
+      const user = (request as any).user;
+      const query = request.query as { company_id?: string };
+
+      try {
+        const data = await request.withContext(async (client) => {
+          return biService.getExecutiveDashboard(client, user.tenant_id, query.company_id);
+        });
+
+        return reply.send({ success: true, data });
+      } catch (err: any) {
+        request.log.error(err, '[BI_DASHBOARD_EXECUTIVE] Falha ao carregar dashboard executivo');
+        return reply.status(500).send({
+          success: false,
+          error: 'Erro interno ao consultar indicadores de BI executivo.',
+        });
+      }
+    }
+  );
+
+  // 2. Radar de Risco Trabalhista (Art. 137, Art. 66, Art. 71, Art. 59, Banco Excedente)
+  app.get(
+    '/labor-risk-radar',
+    { preHandler: [authenticate, requireAdminRole] },
+    async (request, reply) => {
+      if (!request.withContext) {
+        return reply.status(500).send({ success: false, error: 'Contexto de banco não inicializado.' });
+      }
+
+      const user = (request as any).user;
+      const query = request.query as { company_id?: string; article?: string };
+
+      try {
+        const fullData = await request.withContext(async (client) => {
+          return biService.getExecutiveDashboard(client, user.tenant_id, query.company_id);
+        });
+
+        let risks = fullData.laborRiskRadar.risks;
+        if (query.article) {
+          risks = risks.filter((r) => r.article === query.article);
+        }
+
+        return reply.send({
+          success: true,
+          data: {
+            summary: fullData.laborRiskRadar,
+            risks,
+          },
+        });
+      } catch (err: any) {
+        request.log.error(err, '[BI_LABOR_RISK] Falha ao consultar radar de riscos');
+        return reply.status(500).send({
+          success: false,
+          error: 'Erro ao consultar radar de risco trabalhista.',
+        });
+      }
+    }
+  );
+
+  // 3. Endpoint Legado mantido para compatibilidade
   app.get(
     '/dashboard',
     { preHandler: [authenticate, requireAdminRole] },
@@ -11,44 +81,28 @@ export const biRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(500).send({ success: false, error: 'Contexto de banco não inicializado.' });
       }
 
+      const user = (request as any).user;
       try {
-        const metrics = await request.withContext(async (client) => {
-          // Estatísticas no escopo seguro do tenant ativo (RLS)
-          const { rows: contractStats } = await client.query(`
-            SELECT 
-              count(*) FILTER (WHERE status = 'ACTIVE') AS active_contracts,
-              count(*) FILTER (WHERE status = 'INACTIVE') AS inactive_contracts,
-              count(*) FILTER (WHERE status = 'SUSPENDED') AS suspended_contracts,
-              count(*) FILTER (WHERE status = 'VACATION') AS vacation_contracts,
-              COALESCE(avg(base_salary) FILTER (WHERE status = 'ACTIVE'), 0) AS average_salary,
-              COALESCE(sum(base_salary) FILTER (WHERE status = 'ACTIVE'), 0) AS total_payroll_base
-            FROM public.contracts;
-          `);
-
-          const { rows: punchStats } = await client.query(`
-            SELECT count(*) AS total_punches_month
-            FROM public.time_punch_records
-            WHERE punched_at >= date_trunc('month', CURRENT_DATE);
-          `);
-
-          return {
-            contracts: {
-              active: parseInt(contractStats[0]?.active_contracts || '0', 10),
-              inactive: parseInt(contractStats[0]?.inactive_contracts || '0', 10),
-              suspended: parseInt(contractStats[0]?.suspended_contracts || '0', 10),
-              vacation: parseInt(contractStats[0]?.vacation_contracts || '0', 10),
-              averageSalary: parseFloat(contractStats[0]?.average_salary || '0'),
-              totalPayrollBase: parseFloat(contractStats[0]?.total_payroll_base || '0'),
-            },
-            timeTracking: {
-              punchesMonth: parseInt(punchStats[0]?.total_punches_month || '0', 10),
-            },
-          };
+        const fullData = await request.withContext(async (client) => {
+          return biService.getExecutiveDashboard(client, user.tenant_id);
         });
 
         return reply.send({
           success: true,
-          data: metrics,
+          data: {
+            contracts: {
+              active: fullData.stats.activeEmployees,
+              inactive: 0,
+              suspended: fullData.stats.suspendedEmployees,
+              vacation: fullData.stats.vacationEmployees,
+              averageSalary: Math.round(fullData.costs.grossPayrollCents / Math.max(1, fullData.stats.activeEmployees) / 100),
+              totalPayrollBase: fullData.costs.grossPayrollCents / 100,
+            },
+            timeTracking: {
+              punchesMonth: 0,
+            },
+            fullExecutive: fullData,
+          },
         });
       } catch (err: any) {
         request.log.error(err, '[BI_DASHBOARD] Falha ao carregar métricas de BI');

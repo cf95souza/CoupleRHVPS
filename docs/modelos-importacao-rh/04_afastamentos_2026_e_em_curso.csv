@@ -1,0 +1,3 @@
+﻿cpf_colaborador;matricula;nome_colaborador;tipo_afastamento;codigo_motivo_esocial;data_inicio;data_fim_prevista;data_retorno_efetivo;dias_pagos_empresa;cid10_sigiloso;mesma_cid_60dias;maternidade_estendida_180d;estabilidade_ate;observacao
+11122233344;MAT-001;Joao Carlos da Silva;AUXILIO_DOENCA;03;2026-04-01;2026-04-25;2026-04-26;15;M545;NAO;NAO;;EXEMPLO - Afastamento medico 25 dias (15d empresa + 10d INSS) no ano de 2026 (apagar antes de importar)
+99988877766;MAT-003;Ana Paula Ferreira;LICENCA_MATERNIDADE;17;2026-08-10;2026-12-07;;120;Z370;NAO;NAO;;EXEMPLO - Maternidade 120 dias em curso na data da virada (impacto DCTFWeb e 13o proporcional)

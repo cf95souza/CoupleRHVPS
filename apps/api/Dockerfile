@@ -41,7 +41,7 @@ ENV PORT=4000
 ENV HOST=0.0.0.0
 
 # Dependências mínimas de runtime
-RUN apk add --no-cache wget ca-certificates tzdata
+RUN apk add --no-cache wget ca-certificates tzdata openssl
 ENV TZ=America/Sao_Paulo
 
 # Criar usuário não-privilegiado para execução segura

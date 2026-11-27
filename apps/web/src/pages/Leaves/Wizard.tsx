@@ -8,8 +8,7 @@ import {
   Upload,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "../../lib/apiClient";
-import { leaveService } from "../../services/leaveService";
+import { apiClient, supabase } from "../../lib/apiClient";
 import { formatDate } from "../../lib/dateUtils";
 import { toast } from 'sonner';
 
@@ -31,6 +30,7 @@ export default function LeaveWizard({ inline = false, preselectedContractId, onS
   const [icdCode, setIcdCode] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [isExtendedMaternity, setIsExtendedMaternity] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const totalSteps = 4;
@@ -100,18 +100,43 @@ export default function LeaveWizard({ inline = false, preselectedContractId, onS
     setStep((s) => s + 1);
   };
 
+  const getEsocialReasonCode = (type: string) => {
+    switch (type) {
+      case "SICK_LEAVE":
+        return "03";
+      case "WORK_ACCIDENT":
+        return "01";
+      case "MATERNITY":
+        return "17";
+      case "PATERNITY":
+        return "29";
+      case "MILITARY_SERVICE":
+        return "19";
+      case "UNPAID_LEAVE":
+        return "21";
+      case "SUSPENSION":
+        return "22";
+      default:
+        return null;
+    }
+  };
+
   const getLeaveTypeName = (type: string) => {
     switch (type) {
       case "SICK_LEAVE":
-        return "Atestado Médico (Doença)";
-      case "MATERNITY":
-        return "Licença Maternidade";
-      case "PATERNITY":
-        return "Licença Paternidade";
+        return "Auxílio-Doença / Atestado Médico (03)";
       case "WORK_ACCIDENT":
-        return "Acidente de Trabalho";
+        return "Acidente de Trabalho / B91 (01)";
+      case "MATERNITY":
+        return "Licença-Maternidade (17)";
+      case "PATERNITY":
+        return "Licença-Paternidade (29)";
+      case "MILITARY_SERVICE":
+        return "Serviço Militar Obrigatório (19)";
+      case "UNPAID_LEAVE":
+        return "Licença sem Vencimentos (21)";
       case "SUSPENSION":
-        return "Suspensão Disciplinar";
+        return "Suspensão Disciplinar (22)";
       default:
         return "Outros";
     }
@@ -128,23 +153,31 @@ export default function LeaveWizard({ inline = false, preselectedContractId, onS
   const handleSave = async () => {
     setSaving(true);
     try {
-      await leaveService.createLeave({
-        contract_id: selectedEmployee.id,
-        tenant_id: selectedEmployee.tenant_id || (await supabase.auth.getUser()).data.user?.id, 
-        leave_type: leaveType,
-        icd_10_code: icdCode || null,
-        start_date: startDate,
-        end_date: endDate || null,
-        return_date: endDate ? new Date(new Date(endDate).getTime() + 86400000).toISOString().split('T')[0] : null,
-        status: "APPROVED",
+      const returnDate = endDate
+        ? new Date(new Date(`${endDate}T00:00:00Z`).getTime() + 86400000)
+            .toISOString()
+            .slice(0, 10)
+        : null;
+
+      await apiClient.post("/api/v1/leaves", {
+        contractId: selectedEmployee.id,
+        leaveType,
+        esocialReasonCode: getEsocialReasonCode(leaveType),
+        cid10Code: icdCode ? icdCode.trim().toUpperCase() : null,
+        startDate,
+        endDate: endDate || null,
+        returnDate,
+        isExtendedMaternity: leaveType === "MATERNITY" ? isExtendedMaternity : false,
+        status: "ACTIVE",
       });
+      toast.success("Afastamento registrado com sucesso.");
       if (!inline) {
         navigate("/afastamentos");
       }
       if (onSaved) onSaved();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro ao salvar afastamento:", error);
-      toast.error("Ocorreu um erro ao salvar o afastamento.");
+      toast.error(error?.message || "Ocorreu um erro ao salvar o afastamento.");
     } finally {
       setSaving(false);
     }
@@ -282,14 +315,32 @@ export default function LeaveWizard({ inline = false, preselectedContractId, onS
                 >
                   <option value="">Selecione...</option>
                   <option value="SICK_LEAVE">
-                    Atestado Médico (Doença não ocupacional)
+                    Auxílio-Doença / Atestado Médico (eSocial 03)
                   </option>
-                  <option value="WORK_ACCIDENT">Acidente de Trabalho</option>
-                  <option value="MATERNITY">Licença Maternidade</option>
-                  <option value="PATERNITY">Licença Paternidade</option>
-                  <option value="SUSPENSION">Suspensão Disciplinar</option>
+                  <option value="WORK_ACCIDENT">Acidente de Trabalho / B91 (eSocial 01 — FGTS Mantido)</option>
+                  <option value="MATERNITY">Licença-Maternidade (eSocial 17 — Dedutível DCTFWeb)</option>
+                  <option value="PATERNITY">Licença-Paternidade (eSocial 29)</option>
+                  <option value="MILITARY_SERVICE">Serviço Militar Obrigatório (eSocial 19 — FGTS Mantido)</option>
+                  <option value="UNPAID_LEAVE">Licença sem Vencimentos (eSocial 21)</option>
+                  <option value="SUSPENSION">Suspensão Disciplinar (eSocial 22)</option>
                 </select>
               </div>
+
+              {leaveType === "MATERNITY" && (
+                <div className="col-span-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                  <label className="flex items-center gap-2 text-sm text-slate-800 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isExtendedMaternity}
+                      onChange={(e) => setIsExtendedMaternity(e.target.checked)}
+                      className="rounded border-slate-300"
+                    />
+                    <span>
+                      <strong>Empresa Cidadã (180 dias):</strong> Prorrogação de +60 dias após os 120 dias regulares dedutíveis na DCTFWeb
+                    </span>
+                  </label>
+                </div>
+              )}
 
               {(leaveType === "SICK_LEAVE" ||
                 leaveType === "WORK_ACCIDENT") && (

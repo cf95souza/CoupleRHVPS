@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
-import { Plus, Users, Loader2, AlertCircle, Pencil, Trash2, Calendar, FileText } from "lucide-react";
-import { supabase } from "../../../lib/apiClient";
-import { useAuth } from "../../../contexts/AuthContext";
-import { format, parseISO } from "date-fns";
+import { Plus, Users, Loader2, AlertCircle, Pencil, Trash2, Calendar, FileText, ShieldAlert, CheckCircle2 } from "lucide-react";
+import { apiClient } from "../../../lib/apiClient";
+import { format } from "date-fns";
 import { formatDate } from "../../../lib/dateUtils";
 import { toast } from 'sonner';
 import { confirmDialog } from '../../../components/ConfirmDialogProvider';
@@ -15,8 +14,47 @@ const RELATIONSHIPS = [
   { value: "OUTRO", label: "Outro" }
 ];
 
+function toDateInput(value?: string | null): string {
+  if (!value) return "";
+  return String(value).slice(0, 10);
+}
+
+function getComplianceBadge(dep: any): { ok: boolean; label: string } | null {
+  const isFamilySalary = Boolean(dep.is_family_salary ?? dep.is_family_allowance_dependent);
+  const isIncapacitated = Boolean(dep.is_incapacitated ?? dep.has_disability);
+  if (!isFamilySalary || isIncapacitated || !dep.birth_date) return null;
+
+  const birthIso = toDateInput(dep.birth_date);
+  const [by, bm] = birthIso.split("-").map(Number);
+  if (!by || !bm) return null;
+
+  const now = new Date();
+  const cy = now.getFullYear();
+  const cm = now.getMonth() + 1;
+  let age = cy - by;
+  if (cm < bm) age -= 1;
+  age = Math.max(0, age);
+
+  if (age > 14 || (age === 14 && cm > bm)) {
+    return { ok: false, label: "Acima de 14 anos (sem direito)" };
+  }
+  if (age <= 6) {
+    const vaccIso = toDateInput(dep.vaccination_card_date);
+    if (!vaccIso) return { ok: false, label: "Vacina pendente (obrigatória até 6 anos)" };
+    const [vy, vm] = vaccIso.split("-").map(Number);
+    const months = (cy - vy) * 12 + (cm - vm);
+    if (months > 12) return { ok: false, label: "Vacina vencida (> 12 meses)" };
+    return { ok: true, label: "Vacinação em dia" };
+  }
+  const schIso = toDateInput(dep.school_frequency_date);
+  if (!schIso) return { ok: false, label: "Frequência escolar pendente (7 a 14 anos)" };
+  const [sy, sm] = schIso.split("-").map(Number);
+  const months = (cy - sy) * 12 + (cm - sm);
+  if (months > 6) return { ok: false, label: "Frequência escolar vencida (> 6 meses)" };
+  return { ok: true, label: "Frequência escolar em dia" };
+}
+
 export default function ({ workerId, onSaved }: any) {
-  const { user } = useAuth();
   const [dependents, setDependents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -32,8 +70,8 @@ export default function ({ workerId, onSaved }: any) {
     start_date: format(new Date(), "yyyy-MM-dd"),
     end_date: "",
     is_irrf_dependent: false,
-    is_family_allowance_dependent: false,
-    has_disability: false,
+    is_family_salary: false,
+    is_incapacitated: false,
     birth_certificate_number: "",
     vaccination_card_date: "",
     school_frequency_date: ""
@@ -50,14 +88,10 @@ export default function ({ workerId, onSaved }: any) {
   const fetchDependents = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from("dependents")
-        .select("*")
-        .eq("worker_id", workerId)
-        .order("start_date", { ascending: false });
-
-      if (error) throw error;
-      setDependents(data || []);
+      const res = await apiClient.get<{ success: boolean; data: any[] }>(
+        `/api/v1/employees/${workerId}/dependents`
+      );
+      setDependents(res.data || []);
     } catch (err) {
       console.error("Erro ao buscar dependentes:", err);
     } finally {
@@ -75,8 +109,8 @@ export default function ({ workerId, onSaved }: any) {
       start_date: format(new Date(), "yyyy-MM-dd"),
       end_date: "",
       is_irrf_dependent: false,
-      is_family_allowance_dependent: false,
-      has_disability: false,
+      is_family_salary: false,
+      is_incapacitated: false,
       birth_certificate_number: "",
       vaccination_card_date: "",
       school_frequency_date: ""
@@ -89,27 +123,26 @@ export default function ({ workerId, onSaved }: any) {
       id: dep.id,
       name: dep.name,
       cpf: dep.cpf || "",
-      birth_date: dep.birth_date,
+      birth_date: toDateInput(dep.birth_date),
       relationship: dep.relationship,
-      start_date: dep.start_date,
-      end_date: dep.end_date || "",
-      is_irrf_dependent: dep.is_irrf_dependent,
-      is_family_allowance_dependent: dep.is_family_allowance_dependent,
-      has_disability: dep.has_disability,
+      start_date: toDateInput(dep.start_date) || format(new Date(), "yyyy-MM-dd"),
+      end_date: toDateInput(dep.end_date),
+      is_irrf_dependent: Boolean(dep.is_irrf_dependent),
+      is_family_salary: Boolean(dep.is_family_salary ?? dep.is_family_allowance_dependent),
+      is_incapacitated: Boolean(dep.is_incapacitated ?? dep.has_disability),
       birth_certificate_number: dep.birth_certificate_number || "",
-      vaccination_card_date: dep.vaccination_card_date || "",
-      school_frequency_date: dep.school_frequency_date || ""
+      vaccination_card_date: toDateInput(dep.vaccination_card_date),
+      school_frequency_date: toDateInput(dep.school_frequency_date)
     });
     setIsModalOpen(true);
   };
 
   const handleDelete = async (id: string) => {
-    if (!await confirmDialog("Tem certeza que deseja excluir este dependente? Esta ação apagará o histórico folha para ele.")) return;
+    if (!await confirmDialog("Tem certeza que deseja excluir este dependente?")) return;
     try {
-      const { error } = await supabase.from("dependents").delete().eq("id", id);
-      if (error) throw error;
+      await apiClient.delete(`/api/v1/employees/${workerId}/dependents/${id}`);
       fetchDependents();
-      onSaved();
+      onSaved?.();
     } catch (err) {
       console.error("Erro ao excluir", err);
       toast.error("Erro ao excluir dependente.");
@@ -118,49 +151,38 @@ export default function ({ workerId, onSaved }: any) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
-    
+    if (!workerId) return;
+
     setErrorMsg("");
     setSaving(true);
 
     try {
-      const { data: tenantData } = await supabase
-        .from("tenant_users")
-        .select("tenant_id")
-        .eq("user_id", user.id)
-        .single();
-
-      if (!tenantData) throw new Error("Tenant não encontrado");
-
       const payload = {
-        tenant_id: tenantData.tenant_id,
-        worker_id: workerId,
         name: formData.name,
         cpf: formData.cpf || null,
         birth_date: formData.birth_date,
         relationship: formData.relationship,
-        start_date: formData.start_date,
+        start_date: formData.start_date || null,
         end_date: formData.end_date || null,
-        is_irrf_dependent: formData.is_irrf_dependent,
-        is_family_allowance_dependent: formData.is_family_allowance_dependent,
-        has_disability: formData.has_disability,
+        is_irrf_dependent: Boolean(formData.is_irrf_dependent),
+        is_family_salary: Boolean(formData.is_family_salary),
+        is_incapacitated: Boolean(formData.is_incapacitated),
         birth_certificate_number: formData.birth_certificate_number || null,
         vaccination_card_date: formData.vaccination_card_date || null,
         school_frequency_date: formData.school_frequency_date || null
       };
 
       if (formData.id) {
-        const { error } = await supabase.from("dependents").update(payload).eq("id", formData.id);
-        if (error) throw error;
+        await apiClient.put(`/api/v1/employees/${workerId}/dependents/${formData.id}`, payload);
       } else {
-        const { error } = await supabase.from("dependents").insert([payload]);
-        if (error) throw error;
+        await apiClient.post(`/api/v1/employees/${workerId}/dependents`, payload);
       }
 
+      toast.success("Dependente salvo com sucesso.");
       setIsModalOpen(false);
       resetForm();
       fetchDependents();
-      onSaved();
+      onSaved?.();
     } catch (err: any) {
       console.error("Erro ao salvar dependente:", err);
       setErrorMsg(err.message || "Erro ao salvar dependente.");
@@ -235,15 +257,29 @@ export default function ({ workerId, onSaved }: any) {
                 {dep.is_irrf_dependent && (
                   <span className="px-2 py-1 bg-purple-50 text-purple-700 text-xs font-medium rounded-md border border-purple-100">IRRF</span>
                 )}
-                {dep.is_family_allowance_dependent && (
-                  <span className="px-2 py-1 bg-green-50 text-green-700 text-xs font-medium rounded-md border border-green-100">Salário Família</span>
+                {(dep.is_family_salary ?? dep.is_family_allowance_dependent) && (
+                  <span className="px-2 py-1 bg-green-50 text-green-700 text-xs font-medium rounded-md border border-green-100">Salário-Família</span>
                 )}
-                {dep.has_disability && (
+                {(dep.is_incapacitated ?? dep.has_disability) && (
                   <span className="px-2 py-1 bg-amber-50 text-amber-700 text-xs font-medium rounded-md border border-amber-100">Inválido/Deficiência</span>
                 )}
-                {!dep.is_irrf_dependent && !dep.is_family_allowance_dependent && !dep.has_disability && (
+                {!dep.is_irrf_dependent && !(dep.is_family_salary ?? dep.is_family_allowance_dependent) && !(dep.is_incapacitated ?? dep.has_disability) && (
                   <span className="px-2 py-1 bg-slate-50 text-slate-600 text-xs font-medium rounded-md border border-slate-200">Apenas Cadastro</span>
                 )}
+                {(() => {
+                  const badge = getComplianceBadge(dep);
+                  if (!badge) return null;
+                  return (
+                    <span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md border ${
+                      badge.ok
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                        : "bg-rose-50 text-rose-700 border-rose-200"
+                    }`}>
+                      {badge.ok ? <CheckCircle2 size={12} /> : <ShieldAlert size={12} />}
+                      {badge.label}
+                    </span>
+                  );
+                })()}
               </div>
 
               <div className="grid grid-cols-2 gap-y-2 text-sm text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-100">
@@ -343,15 +379,15 @@ export default function ({ workerId, onSaved }: any) {
                   </label>
                   
                   <label className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg bg-slate-50 cursor-pointer hover:bg-slate-100">
-                    <input type="checkbox" className="w-5 h-5 text-primary-600 rounded" checked={formData.is_family_allowance_dependent} onChange={e => setFormData({...formData, is_family_allowance_dependent: e.target.checked})} />
+                    <input type="checkbox" className="w-5 h-5 text-primary-600 rounded" checked={formData.is_family_salary} onChange={e => setFormData({...formData, is_family_salary: e.target.checked})} />
                     <div>
                       <p className="font-medium text-slate-800">Dependente para Salário-Família</p>
-                      <p className="text-xs text-slate-500">Garante cota de Salário-Família se o funcionário estiver na faixa.</p>
+                      <p className="text-xs text-slate-500">Garante cota de Salário-Família (rubrica 305) se remuneração INSS ≤ teto legal.</p>
                     </div>
                   </label>
 
                   <label className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg bg-slate-50 cursor-pointer hover:bg-slate-100">
-                    <input type="checkbox" className="w-5 h-5 text-primary-600 rounded" checked={formData.has_disability} onChange={e => setFormData({...formData, has_disability: e.target.checked})} />
+                    <input type="checkbox" className="w-5 h-5 text-primary-600 rounded" checked={formData.is_incapacitated} onChange={e => setFormData({...formData, is_incapacitated: e.target.checked})} />
                     <div>
                       <p className="font-medium text-slate-800">Possui invalidez / Deficiência severa</p>
                       <p className="text-xs text-slate-500">Remove o limite de idade para recebimento de benefícios atrelados ao dependente.</p>

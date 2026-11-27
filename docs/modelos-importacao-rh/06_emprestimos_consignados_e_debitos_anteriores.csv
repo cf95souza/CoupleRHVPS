@@ -1,0 +1,3 @@
+﻿cpf_colaborador;matricula;nome_colaborador;tipo_registro;instituicao_financeira;numero_contrato;valor_total;valor_parcela;total_parcelas;parcelas_ja_pagas;data_inicio;competencia_origem_debito;saldo_restante_debito;observacao
+11122233344;MAT-001;Joao Carlos da Silva;CONSIGNADO;Banco do Brasil;CONS-2026-9981;12000.00;500.00;24;5;2026-06-01;;;EXEMPLO - Emprestimo consignado em curso com 5 de 24 parcelas ja pagas (restam 19 parcelas e respeito a margem de 35%)
+55566677788;MAT-002;Maria Fernanda Souza;DEBITO_INSUFICIENCIA_899;;;;;;;2026-10-31;2026-10;142.80;EXEMPLO - Saldo devedor de insuficiencia de folha anterior (sera descontado automaticamente na rubrica 899)

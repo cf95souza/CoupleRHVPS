@@ -163,7 +163,7 @@ export const TenantBackupService = {
     // 5. Conformidade, Certificados e LGPD
     notify('Exportando Metadados de Certificados e Registros LGPD...', 95, 'COMPLIANCE');
     const [certsRes, lgpdSharingsRes] = await Promise.all([
-      supabase.from('tenant_certificates').select('*').eq('tenant_id', tenantId),
+      supabase.from('esocial_certificates').select('id, tenant_id, company_id, environment, filename, subject_name, cnpj, issuer_dn, serial_number, valid_from, valid_to, is_active, created_at').eq('tenant_id', tenantId),
       supabase.from('lgpd_data_sharing_registry').select('*').eq('tenant_id', tenantId)
     ]);
 

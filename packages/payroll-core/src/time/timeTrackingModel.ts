@@ -86,6 +86,9 @@ export interface TimeDailySummary {
   overtime_100_minutes: number;
   night_shift_minutes: number;
   night_overtime_minutes: number;
+  night_overtime_100_minutes?: number;
+  standby_minutes?: number;
+  readiness_minutes?: number;
   delay_minutes: number;
   absence_minutes: number;
   break_taken_minutes: number;
