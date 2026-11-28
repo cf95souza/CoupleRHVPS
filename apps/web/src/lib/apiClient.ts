@@ -54,6 +54,18 @@ export class ApiError extends Error {
 let inMemoryAccessToken: string | null = null;
 let inMemoryUser: User | null = null;
 const authFailureListeners: Array<() => void> = [];
+type AuthStateChangeCallback = (event: string, session: Session | null) => void;
+const authStateChangeListeners: Array<AuthStateChangeCallback> = [];
+
+export function notifyAuthStateChange(event: string, session: Session | null): void {
+  authStateChangeListeners.forEach((callback) => {
+    try {
+      callback(event, session);
+    } catch (err) {
+      console.error('[apiClient] Erro no listener de authStateChange:', err);
+    }
+  });
+}
 
 export function setAccessToken(token: string | null, user: User | null = null): void {
   inMemoryAccessToken = token;
@@ -494,8 +506,14 @@ export const apiClient = {
       const res = await apiClient.post<any>('/api/v1/auth/login', credentials, {
         skipAuth: true,
       });
-      if (res?.access_token) {
-        setAccessToken(res.access_token, res.user);
+      const token = res?.access_token || res?.accessToken;
+      if (token) {
+        setAccessToken(token, res.user);
+        notifyAuthStateChange('SIGNED_IN', {
+          access_token: token,
+          user: res.user,
+          expires_in: res.expiresInSeconds || res.expires_in,
+        });
       }
       return res;
     },
@@ -509,8 +527,15 @@ export const apiClient = {
       const res = await apiClient.post<any>('/api/v1/auth/portal/login', credentials, {
         skipAuth: true,
       });
-      if (res?.access_token) {
-        setAccessToken(res.access_token, res.user);
+      const token = res?.access_token || res?.accessToken;
+      if (token) {
+        const user = res.user || res.worker;
+        setAccessToken(token, user);
+        notifyAuthStateChange('SIGNED_IN', {
+          access_token: token,
+          user,
+          expires_in: res.expiresInSeconds || res.expires_in,
+        });
       }
       return res;
     },
@@ -520,8 +545,14 @@ export const apiClient = {
         skipAuth: true,
         skipRefresh: true,
       });
-      if (res?.access_token) {
-        setAccessToken(res.access_token, res.user);
+      const token = res?.access_token || res?.accessToken;
+      if (token) {
+        setAccessToken(token, res.user);
+        notifyAuthStateChange('TOKEN_REFRESHED', {
+          access_token: token,
+          user: res.user,
+          expires_in: res.expiresInSeconds || res.expires_in,
+        });
       }
       return res;
     },
@@ -533,6 +564,7 @@ export const apiClient = {
         });
       } finally {
         clearAccessToken();
+        notifyAuthStateChange('SIGNED_OUT', null);
       }
     },
 
@@ -610,11 +642,15 @@ export const apiClient = {
       await apiClient.auth.logout();
     },
 
-    onAuthStateChange(_callback: (event: string, session: Session | null) => void) {
+    onAuthStateChange(callback: AuthStateChangeCallback) {
+      authStateChangeListeners.push(callback);
       return {
         data: {
           subscription: {
-            unsubscribe: () => {},
+            unsubscribe: () => {
+              const idx = authStateChangeListeners.indexOf(callback);
+              if (idx !== -1) authStateChangeListeners.splice(idx, 1);
+            },
           },
         },
       };
