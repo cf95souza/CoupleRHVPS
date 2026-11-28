@@ -64,7 +64,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const permissions = user?.permissions || [];
-  const isSystemAdmin = user?.role === 'system_admin' || user?.isSystemAdmin === true;
+  const isSystemAdmin = user?.role === 'system_admin' || user?.role === 'admin' || user?.isSystemAdmin === true;
 
   const hasPermission = useCallback((permission: string | string[]): boolean => {
     if (!user) return false;

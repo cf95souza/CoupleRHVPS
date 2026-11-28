@@ -100,7 +100,7 @@ const NAV_SECTIONS: Array<{
 ];
 
 export default function DashboardLayout() {
-  const { user, hasPermission, signOut } = useAuth();
+  const { user, hasPermission, signOut, isSystemAdmin } = useAuth();
   const { companies, selectedCompanyId, selectedCompany, setSelectedCompanyId } = useCompany();
   const navigate = useNavigate();
   const location = useLocation();
@@ -110,6 +110,7 @@ export default function DashboardLayout() {
   // Filtragem de seções e itens conforme as permissões ativas do usuário
   const visibleSections = NAV_SECTIONS.map((section) => {
     const visibleItems = section.items.filter((item) => {
+      if (isSystemAdmin) return true;
       if (!item.permission) return true;
       return hasPermission(item.permission);
     });
