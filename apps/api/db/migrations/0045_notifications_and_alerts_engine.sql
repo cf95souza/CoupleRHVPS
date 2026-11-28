@@ -37,6 +37,16 @@ CREATE INDEX IF NOT EXISTS idx_user_notifications_created
 -- Permissões para role da aplicação
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_notifications TO couplerh_app;
 
+-- Overload conveniente para has_permission usando tenant do contexto
+CREATE OR REPLACE FUNCTION public.has_permission(p_permission_slug TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT public.has_permission(public.current_app_tenant_id(), p_permission_slug);
+$$;
+GRANT EXECUTE ON FUNCTION public.has_permission(TEXT) TO couplerh_app;
+
 -- RLS (Row Level Security)
 ALTER TABLE public.user_notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_notifications FORCE ROW LEVEL SECURITY;
@@ -54,7 +64,7 @@ CREATE POLICY p_user_notifications_tenant_select ON public.user_notifications
         tenant_id = public.current_app_tenant_id()
         AND (
             user_id = public.current_app_user_id()
-            OR public.has_permission('settings:read')
+            OR public.has_permission(tenant_id, 'settings:read')
         )
     );
 
@@ -70,7 +80,7 @@ CREATE POLICY p_user_notifications_tenant_update ON public.user_notifications
         tenant_id = public.current_app_tenant_id()
         AND (
             user_id = public.current_app_user_id()
-            OR public.has_permission('settings:write')
+            OR public.has_permission(tenant_id, 'settings:write')
         )
     )
     WITH CHECK (
@@ -83,7 +93,7 @@ CREATE POLICY p_user_notifications_tenant_delete ON public.user_notifications
         tenant_id = public.current_app_tenant_id()
         AND (
             user_id = public.current_app_user_id()
-            OR public.has_permission('settings:write')
+            OR public.has_permission(tenant_id, 'settings:write')
         )
     );
 
