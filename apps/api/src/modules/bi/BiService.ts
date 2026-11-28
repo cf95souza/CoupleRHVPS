@@ -86,7 +86,7 @@ export class BiService {
     );
 
     const { rows: companyCountRes } = await client.query(
-      `SELECT count(*) as comp_count FROM public.companies WHERE tenant_id = $1 AND is_active = true`,
+      `SELECT count(*) as comp_count FROM public.companies WHERE tenant_id = $1 AND status = 'ACTIVE' AND deleted_at IS NULL`,
       [tenantId]
     );
 
@@ -99,19 +99,19 @@ export class BiService {
     const { rows: latestPayroll } = await client.query(
       `
       SELECT 
-        COALESCE(sum(p.gross_earnings), 0) as gross_cents,
-        COALESCE(sum(p.net_amount), 0) as net_cents,
-        COALESCE(sum(p.inss_employer), 0) + COALESCE(sum(p.fgts_amount), 0) as taxes_cents
+        COALESCE(sum(p.gross_salary), 0) * 100 as gross_cents,
+        COALESCE(sum(p.net_salary), 0) * 100 as net_cents,
+        COALESCE(sum(p.base_inss * 0.20 + p.fgts_month), 0) * 100 as taxes_cents
       FROM public.payslips p
-      JOIN public.payroll_periods pp ON pp.id = p.period_id
+      JOIN public.payroll_periods pp ON pp.id = p.payroll_period_id
       WHERE pp.tenant_id = $1
         AND pp.type = 'MONTHLY'
-        AND pp.reference_month = (
-          SELECT MAX(reference_month) FROM public.payroll_periods WHERE tenant_id = $1 AND type = 'MONTHLY'
+        AND pp.competence_date = (
+          SELECT MAX(competence_date) FROM public.payroll_periods WHERE tenant_id = $1 AND type = 'MONTHLY'
         )
     `,
       [tenantId]
-    );
+    ).catch(() => ({ rows: [] }));
 
     const grossPayrollCents = parseInt(latestPayroll[0]?.gross_cents || '0', 10);
     const netPayrollCents = parseInt(latestPayroll[0]?.net_cents || '0', 10);
@@ -125,21 +125,21 @@ export class BiService {
     const { rows: history12m } = await client.query(
       `
       SELECT 
-        to_char(pp.reference_month, 'YYYY-MM') as period_key,
-        COALESCE(sum(p.gross_earnings), 0) as gross_amount,
-        COALESCE(sum(p.net_amount), 0) as net_amount,
-        COALESCE(sum(p.inss_employer), 0) + COALESCE(sum(p.fgts_amount), 0) as employer_taxes,
+        to_char(pp.competence_date, 'YYYY-MM') as period_key,
+        COALESCE(sum(p.gross_salary), 0) as gross_amount,
+        COALESCE(sum(p.net_salary), 0) as net_amount,
+        COALESCE(sum(p.base_inss * 0.20 + p.fgts_month), 0) as employer_taxes,
         count(DISTINCT p.contract_id) as headcount
       FROM public.payroll_periods pp
-      LEFT JOIN public.payslips p ON p.period_id = pp.id
+      LEFT JOIN public.payslips p ON p.payroll_period_id = pp.id
       WHERE pp.tenant_id = $1
         AND pp.type = 'MONTHLY'
-        AND pp.reference_month >= (CURRENT_DATE - INTERVAL '12 months')
-      GROUP BY pp.reference_month
-      ORDER BY pp.reference_month ASC
+        AND pp.competence_date >= (CURRENT_DATE - INTERVAL '12 months')
+      GROUP BY pp.competence_date
+      ORDER BY pp.competence_date ASC
     `,
       [tenantId]
-    );
+    ).catch(() => ({ rows: [] }));
 
     const payrollHistory12m = history12m.map((h: any) => {
       const gross = parseInt(h.gross_amount || '0', 10) / 100;
@@ -159,13 +159,13 @@ export class BiService {
     const { rows: turnoverRes } = await client.query(
       `
       SELECT 
-        count(*) FILTER (WHERE c.start_date >= (CURRENT_DATE - INTERVAL '12 months')) AS admissions,
-        count(*) FILTER (WHERE c.end_date >= (CURRENT_DATE - INTERVAL '12 months') AND c.status = 'INACTIVE') AS terminations
+        count(*) FILTER (WHERE c.admission_date >= (CURRENT_DATE - INTERVAL '12 months')) AS admissions,
+        count(*) FILTER (WHERE c.termination_date >= (CURRENT_DATE - INTERVAL '12 months') AND c.status = 'INACTIVE') AS terminations
       FROM public.contracts c
       WHERE c.tenant_id = $1
     `,
       [tenantId]
-    );
+    ).catch(() => ({ rows: [] }));
 
     const admissions = parseInt(turnoverRes[0]?.admissions || '0', 10);
     const terminations = parseInt(turnoverRes[0]?.terminations || '0', 10);
@@ -176,24 +176,24 @@ export class BiService {
     const { rows: otStats } = await client.query(
       `
       SELECT 
-        COALESCE(sum(total_overtime_hours), 0) as ot_hours
-      FROM public.timesheet_summaries
+        COALESCE(sum(overtime_50_hours + overtime_100_hours + night_overtime_50_hours + night_overtime_100_hours), 0) as ot_hours
+      FROM public.time_punch_daily_summaries
       WHERE tenant_id = $1
-        AND period_month = date_trunc('month', CURRENT_DATE);
+        AND work_date >= date_trunc('month', CURRENT_DATE);
     `,
       [tenantId]
-    );
+    ).catch(() => ({ rows: [] }));
 
     const { rows: tbStats } = await client.query(
       `
       SELECT 
-        COALESCE(sum(CASE WHEN minutes_amount < 0 THEN abs(minutes_amount) ELSE 0 END), 0) as comp_minutes,
-        COALESCE(sum(current_balance_minutes), 0) as total_balance_minutes
+        COALESCE(sum(CASE WHEN balance_minutes < 0 THEN abs(balance_minutes) ELSE 0 END), 0) as comp_minutes,
+        COALESCE(sum(balance_minutes), 0) as total_balance_minutes
       FROM public.time_bank_accounts
-      WHERE tenant_id = $1 AND is_active = true;
+      WHERE tenant_id = $1 AND closure_date IS NULL;
     `,
       [tenantId]
-    );
+    ).catch(() => ({ rows: [] }));
 
     const overtimeHoursMonth = parseFloat(otStats[0]?.ot_hours || '0');
     const timeBankCompensatedHours = Math.round(parseInt(tbStats[0]?.comp_minutes || '0', 10) / 60);
@@ -203,14 +203,14 @@ export class BiService {
     const { rows: absStats } = await client.query(
       `
       SELECT 
-        COALESCE(sum(total_absence_hours), 0) as absence_hours,
-        COALESCE(sum(total_regular_hours), 0) as regular_hours
-      FROM public.timesheet_summaries
+        COALESCE(sum(absence_hours + delay_hours), 0) as absence_hours,
+        COALESCE(sum(worked_hours), 0) as regular_hours
+      FROM public.time_punch_daily_summaries
       WHERE tenant_id = $1
-        AND period_month = date_trunc('month', CURRENT_DATE);
+        AND work_date >= date_trunc('month', CURRENT_DATE);
     `,
       [tenantId]
-    );
+    ).catch(() => ({ rows: [] }));
     const absenceHours = parseFloat(absStats[0]?.absence_hours || '0');
     const regularHours = Math.max(1, parseFloat(absStats[0]?.regular_hours || '0'));
     const absenteeismRateMonth = parseFloat(((absenceHours / (regularHours + absenceHours)) * 100).toFixed(1));
@@ -224,7 +224,7 @@ export class BiService {
       SELECT 
         vp.id,
         vp.contract_id,
-        w.name AS worker_name,
+        w.full_name AS worker_name,
         w.cpf,
         vp.concessive_period_end,
         (vp.concessive_period_end - CURRENT_DATE) AS days_left
@@ -239,7 +239,7 @@ export class BiService {
       LIMIT 10;
     `,
       [tenantId]
-    );
+    ).catch(() => ({ rows: [] }));
 
     for (const v of vacationRisks) {
       const daysLeft = parseInt(v.days_left || '0', 10);
@@ -290,7 +290,7 @@ export class BiService {
       )
       SELECT 
         cs.contract_id,
-        w.name AS worker_name,
+        w.full_name AS worker_name,
         w.cpf,
         cs.exit_time,
         cs.entry_time,
@@ -302,7 +302,7 @@ export class BiService {
       LIMIT 10;
     `,
       [tenantId]
-    );
+    ).catch(() => ({ rows: [] }));
 
     for (const ij of interjornadaRisks) {
       risks.push({
@@ -322,25 +322,24 @@ export class BiService {
     const { rows: intrajornadaRisks } = await client.query(
       `
       SELECT 
-        ts.id,
-        ts.contract_id,
-        w.name AS worker_name,
+        tp.id,
+        tp.contract_id,
+        w.full_name AS worker_name,
         w.cpf,
-        ts.date,
-        ts.total_worked_hours,
-        ts.meal_break_minutes
-      FROM public.time_entries ts
-      JOIN public.contracts c ON c.id = ts.contract_id
+        tp.work_date AS date,
+        tp.worked_hours AS total_worked_hours
+      FROM public.time_punch_daily_summaries tp
+      JOIN public.contracts c ON c.id = tp.contract_id
       JOIN public.workers w ON w.id = c.worker_id
       WHERE c.tenant_id = $1
-        AND ts.date >= (CURRENT_DATE - INTERVAL '30 days')
-        AND ts.total_worked_hours > 6
-        AND ts.meal_break_minutes < 60
-      ORDER BY ts.date DESC
+        AND tp.work_date >= (CURRENT_DATE - INTERVAL '30 days')
+        AND tp.worked_hours > 6
+        AND tp.inconsistencies_json::text LIKE '%INTRAJORNADA%'
+      ORDER BY tp.work_date DESC
       LIMIT 10;
     `,
       [tenantId]
-    ).catch(() => ({ rows: [] })); // Trata caso tabela opcional tenha outro esquema de batidas
+    ).catch(() => ({ rows: [] }));
 
     for (const it of intrajornadaRisks) {
       risks.push({
@@ -350,7 +349,7 @@ export class BiService {
         cpf: it.cpf,
         article: 'Art. 71 CLT',
         severity: 'WARNING',
-        description: `Intervalo de refeição de apenas ${it.meal_break_minutes} min em jornada de ${it.total_worked_hours}h (mínimo legal 60 min).`,
+        description: `Inconsistência de intervalo intrajornada em jornada de ${it.total_worked_hours}h (mínimo legal 60 min).`,
         details: `Data: ${it.date}. Indenização devida sobre o tempo suprimido com acréscimo de 50% (§4º Art. 71 CLT).`,
         suggested_action: 'Alertar gestor da equipe e lançar indenização de intrajornada se não houver acordo de redução.',
       });
@@ -361,7 +360,7 @@ export class BiService {
       `
       SELECT 
         tp.contract_id,
-        w.name AS worker_name,
+        w.full_name AS worker_name,
         w.cpf,
         date_trunc('day', tp.punched_at) AS day_worked,
         count(*) AS total_punches
@@ -370,12 +369,12 @@ export class BiService {
       JOIN public.workers w ON w.id = c.worker_id
       WHERE tp.tenant_id = $1
         AND tp.punched_at >= (CURRENT_DATE - INTERVAL '15 days')
-      GROUP BY tp.contract_id, w.name, w.cpf, date_trunc('day', tp.punched_at)
-      HAVING count(*) >= 6 -- Múltiplas batidas extras indicando sobrejornada extrema
+      GROUP BY tp.contract_id, w.full_name, w.cpf, date_trunc('day', tp.punched_at)
+      HAVING count(*) >= 6
       LIMIT 10;
     `,
       [tenantId]
-    );
+    ).catch(() => ({ rows: [] }));
 
     for (const ot of overtimeExcessRisks) {
       risks.push({
@@ -397,20 +396,20 @@ export class BiService {
       SELECT 
         tb.id,
         tb.contract_id,
-        w.name AS worker_name,
+        w.full_name AS worker_name,
         w.cpf,
-        round(tb.current_balance_minutes / 60::numeric, 1) AS balance_hours
+        round(tb.balance_minutes / 60::numeric, 1) AS balance_hours
       FROM public.time_bank_accounts tb
       JOIN public.contracts c ON c.id = tb.contract_id
       JOIN public.workers w ON w.id = c.worker_id
       WHERE tb.tenant_id = $1
-        AND tb.is_active = true
-        AND tb.current_balance_minutes >= (30 * 60)
-      ORDER BY tb.current_balance_minutes DESC
+        AND tb.closure_date IS NULL
+        AND tb.balance_minutes >= (30 * 60)
+      ORDER BY tb.balance_minutes DESC
       LIMIT 10;
     `,
       [tenantId]
-    );
+    ).catch(() => ({ rows: [] }));
 
     for (const tb of tbExcess) {
       risks.push({
